@@ -1,0 +1,7 @@
+# Bundle layer: insert the gate after webServer is bound.
+# Per-deployment options (keyEnv, title, …) belong in $DSH_HOME/cordis.patch.yml,
+# not here — this file is shared by every install.
+- insert:
+    - id: dsh-simple-auth
+      name: dsh-simple-auth
+      inject: [webServer]
