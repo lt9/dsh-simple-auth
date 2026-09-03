@@ -12,7 +12,8 @@ export const DEFAULTS = {
   hint: '',
   remember: true,
   failMax: 8,
-  failWindowMs: 15 * 60 * 1000
+  failWindowMs: 15 * 60 * 1000,
+  rpcMinTimeoutMs: 120000
 }
 
 export function mergeConfig(raw) {

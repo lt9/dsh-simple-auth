@@ -57,3 +57,25 @@ test('loadKey reads from env by name', () => {
   const key = loadKey({ keyEnv: 'UNIT_KEY', keyFile: '' }, { UNIT_KEY: '  hello  ' })
   assert.equal(key, 'hello')
 })
+
+test('elideHistoryPayload drops closed-message chunks and keeps the message', async () => {
+  const { elideHistoryPayload } = await import('../src/history.js')
+  const payload = {
+    rpcId: '1',
+    result: {
+      ok: true,
+      value: {
+        hasMore: false,
+        events: [
+          { event: { type: 'assistant/chunk', data: { turn: 1, step: 0, text: 'a' } } },
+          { event: { type: 'assistant/chunk', data: { turn: 1, step: 0, text: 'b' } } },
+          { event: { type: 'assistant/message', data: { turn: 1, step: 0, text: 'ab' } } },
+          { event: { type: 'assistant/chunk', data: { turn: 2, step: 0, text: 'live' } } }
+        ]
+      }
+    }
+  }
+  const out = elideHistoryPayload(payload)
+  const types = out.result.value.events.map((row) => row.event.type)
+  assert.deepEqual(types, ['assistant/message', 'assistant/chunk'])
+})

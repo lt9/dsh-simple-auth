@@ -66,6 +66,7 @@ All keys are optional. Defaults are applied in code (home-layer patch `config` *
 | `title` | `DeepSeek Harness` | Login heading |
 | `hint` | (built-in zh/en copy) | Login subtitle |
 | `remember` | `true` | Show “remember key on this device” (localStorage only; the server still uses the cookie) |
+| `rpcMinTimeoutMs` | `120000` | Floor for `AbortSignal.timeout` injected into the web index. dsh’s unary RPC default is 30s; large `session.history` pages over a tunnel abort with `The user aborted a request`. `0` disables the inject |
 
 Never put the key itself in YAML or git.
 
@@ -75,7 +76,9 @@ Never put the key itself in YAML or git.
 - Fail-closed: misconfiguration does not leave the UI open.
 - Login attempts are rate-limited per client IP (honors `X-Forwarded-For` only when the peer is loopback).
 - Sessions are HMAC-signed with the access key (stateless). Rotating the key invalidates every cookie.
+- Authenticated JSON `/api` responses that look like `session.history` pages drop `assistant/chunk` events whose message already closed ([dsh #4678](https://github.com/deepseek-ai/deepseek-harness/discussions/4678)) so the browser does not download tens of megabytes of redundant deltas.
 - Do not expose dsh over plaintext on the public internet; use HTTPS and keep `cookieSecure: auto`.
+- Behind a tunnel, also pass the public origin to dsh: `--trusted-host your.example:port` (repeatable). This plugin already rewrites `Host`/`Origin` to loopback after login; the CLI flag is the documented backup for the `/api` fence.
 
 ## Development
 

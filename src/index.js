@@ -1,3 +1,5 @@
+import { injectBoot } from './boot.js'
+import { elideHistoryPayload } from './history.js'
 import { renderLoginPage } from './login-page.js'
 import {
   DEFAULTS,
@@ -89,6 +91,52 @@ function wantsJson(req) {
   const accept = String(req.headers.accept || '')
   const type = String(req.headers['content-type'] || '')
   return type.includes('application/json') || accept.includes('application/json')
+}
+
+function shouldElide(req) {
+  const method = req.method || 'GET'
+  if (method !== 'POST' && method !== 'PUT') return false
+  const path = pathnameOf(req)
+  if (path !== '/api' && !path.startsWith('/api/')) return false
+  const accept = String(req.headers.accept || '')
+  if (accept.includes('text/event-stream')) return false
+  return true
+}
+
+function tapJsonElide(res) {
+  const chunks = []
+  const origEnd = res.end.bind(res)
+  const origWrite = res.write.bind(res)
+  res.write = function (chunk, enc, cb) {
+    if (chunk && typeof chunk !== 'function') {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, typeof enc === 'string' ? enc : 'utf8'))
+    }
+    if (typeof enc === 'function') enc()
+    else if (typeof cb === 'function') cb()
+    return true
+  }
+  res.end = function (chunk, enc, cb) {
+    if (typeof chunk === 'function') {
+      cb = chunk
+      chunk = undefined
+    }
+    if (chunk) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, typeof enc === 'string' ? enc : 'utf8'))
+    }
+    let out = Buffer.concat(chunks)
+    try {
+      if (out.length && (out[0] === 0x7b || out[0] === 0x5b)) {
+        out = Buffer.from(JSON.stringify(elideHistoryPayload(JSON.parse(out.toString('utf8')))))
+      }
+    } catch {
+      /* keep original bytes */
+    }
+    if (!res.headersSent) res.setHeader('content-length', String(out.length))
+    const encoding = typeof enc === 'string' ? enc : undefined
+    const callback = typeof cb === 'function' ? cb : typeof enc === 'function' ? enc : undefined
+    return origEnd(out, encoding, callback)
+  }
+  return origWrite
 }
 
 function rejectUpgrade(socket, status = 401, body = 'unauthorized') {
@@ -271,6 +319,7 @@ export function apply(ctx, rawConfig) {
       return
     }
     rewriteLoopback(req, loopbackAuthority)
+    if (shouldElide(req)) tapJsonElide(res)
     downstream()
   }
 
@@ -323,4 +372,12 @@ export function apply(ctx, rawConfig) {
   if (server.listening) start()
   else server.once('listening', start)
   ctx.effect(() => () => dispose(), 'dsh-simple-auth: gate')
+
+  const minTimeout = Number(config.rpcMinTimeoutMs)
+  if (minTimeout > 0 && typeof webServer.tapIndex === 'function') {
+    ctx.effect(
+      () => webServer.tapIndex((html) => injectBoot(html, minTimeout)),
+      'dsh-simple-auth: rpc timeout floor'
+    )
+  }
 }

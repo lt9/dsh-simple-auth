@@ -65,6 +65,7 @@ systemd / Docker 把同一变量写进 `Environment` / `EnvironmentFile`。若�
 | `title` | `DeepSeek Harness` | 登录页标题 |
 | `hint` | 内置中英文案 | 登录页说明 |
 | `remember` | `true` | 显示「在这台设备记住密钥」（只写 localStorage；服务端仍认 Cookie） |
+| `rpcMinTimeoutMs` | `120000` | 注入到页面的 `AbortSignal.timeout` 下限。dsh unary RPC 默认 30 秒，大历史页走隧道会报 `The user aborted a request`。`0` 关闭注入 |
 
 不要把密钥写进 YAML 或 git。
 
@@ -74,7 +75,9 @@ systemd / Docker 把同一变量写进 `Environment` / `EnvironmentFile`。若�
 - 配置缺失时关死，不会把界面裸奔出去。
 - 登录按客户端 IP 限速（仅当对端是回环时才信任 `X-Forwarded-For`）。
 - 会话用访问密钥做 HMAC 签名（无状态）。轮换密钥会使全部 Cookie 失效。
+- 已登录的 JSON `/api` 若是历史页，会丢掉已闭合消息的 `assistant/chunk`（[dsh #4678](https://github.com/deepseek-ai/deepseek-harness/discussions/4678)），避免浏览器拉十几 MB 的冗余增量。
 - 公网请走 HTTPS，并保持 `cookieSecure: auto`。
+- 走隧道时，把浏览器地址栏的主机也交给 dsh：`--trusted-host 你的域名或IP:端口`（可重复）。本插件登录后会把 `Host`/`Origin` 改写成回环；CLI 参数是官方文档里的备用围栏。
 
 ## 开发
 
