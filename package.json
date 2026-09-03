@@ -1,12 +1,12 @@
 {
   "name": "dsh-simple-auth",
   "version": "0.1.0",
-  "description": "Single shared-key login gate for DeepSeek Harness (dsh) web. No accounts, no first-visit bootstrap — set a key and every page, API, and WebSocket is closed until it is presented.",
+  "description": "Single shared-key login gate for DeepSeek Harness (dsh) web. No accounts, no first-visit bootstrap \u2014 set a key and every page, API, and WebSocket is closed until it is presented.",
   "type": "module",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://my.pipboy.cn:10881/tuan/dsh-simple-auth.git"
+    "url": "git+https://github.com/lt9/dsh-simple-auth.git"
   },
   "main": "src/index.js",
   "exports": {
@@ -36,5 +36,9 @@
     "bundle": {
       "patch": "./cordis.patch.yml"
     }
-  }
+  },
+  "bugs": {
+    "url": "https://github.com/lt9/dsh-simple-auth/issues"
+  },
+  "homepage": "https://github.com/lt9/dsh-simple-auth#readme"
 }

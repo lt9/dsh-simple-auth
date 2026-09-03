@@ -17,7 +17,8 @@
 ## 安装
 
 ```bash
-dsh plugin --profile web add /path/to/dsh-simple-auth
+git clone https://github.com/lt9/dsh-simple-auth.git
+dsh plugin --profile web add ./dsh-simple-auth
 # 若报 ERR_PNPM_ADDING_TO_ROOT，把 -w 传给 pnpm：
 #   dsh plugin --profile web add -w /path/to/dsh-simple-auth
 ```

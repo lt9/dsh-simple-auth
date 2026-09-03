@@ -17,7 +17,8 @@ This is the same shape as a private-dashboard API key: one secret, a login field
 ## Install
 
 ```bash
-dsh plugin --profile web add /path/to/dsh-simple-auth
+git clone https://github.com/lt9/dsh-simple-auth.git
+dsh plugin --profile web add ./dsh-simple-auth
 # Some dsh web profiles are a pnpm workspace. If add refuses with
 # ERR_PNPM_ADDING_TO_ROOT, pass -w through to pnpm:
 #   dsh plugin --profile web add -w /path/to/dsh-simple-auth
