@@ -71,6 +71,19 @@ All keys are optional. Defaults are applied in code (home-layer patch `config` *
 
 Never put the key itself in YAML or git.
 
+## Multi-user session sharing (0.2+)
+
+When `usersFile` is set, each login key maps to a user `id` + `name`. Cookies sign `userId` with a separate `secret` file. Sessions are isolated by default; owners can share a session so both parties see the same `sessionId`. Concurrent `session.prompt` / `session.updateQueue` on one session returns `409 session-busy`.
+
+**Limits:** credentials, bash, workspace, and settings remain machine-wide. Sharing a session shares the live agent, not chat text only.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `usersFile` | `""` | JSON user list; enables multi-user when valid |
+| `aclFile` | `$DSH_HOME/simple-auth/acl.json` | Session owner / sharedWith |
+| `secretFile` | `$DSH_HOME/simple-auth/secret` | Cookie HMAC secret (auto-created) |
+| `legacyOwner` | `master` | Owner for pre-existing sessions on upgrade |
+
 ## Security notes
 
 - This is **access control**, not a substitute for TLS, OS hardening, or treating the agent as remote code execution. Anyone with the key can drive the agent.

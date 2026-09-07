@@ -70,6 +70,35 @@ systemd / Docker 把同一变量写进 `Environment` / `EnvironmentFile`。若�
 
 不要把密钥写进 YAML 或 git。
 
+## 多用户与会话分享（0.2+）
+
+配置 `usersFile` 后进入多用户模式：登录页仍只填一把密钥，每把密钥绑定 `id` + `name`。Cookie 签 `userId`（独立 `secret` 文件），不再用登录密钥签名。
+
+```json
+// $DSH_HOME/simple-auth/users.json（0600）
+[
+  { "id": "master", "name": "master", "keyEnv": "LLAMA_API_KEY" },
+  { "id": "guest", "name": "guest", "keyFile": "/path/to/guest-key" },
+  { "id": "guest2", "name": "访客乙", "keyFile": "/path/to/guest2-key" }
+]
+```
+
+`users.json` 是数组，可配置**任意多个访客**。每个用户独立 `id`、`name` 和密钥（`key` / `keyFile` / `keyEnv`）。分享面板会对所有非当前用户显示复选框，可多选。
+
+- 默认会话隔离：`session.list` / WebSocket 事件按 ACL 过滤
+- 分享后双方共用同一 `sessionId`；`session.prompt` / `session.updateQueue` 互斥（第二人 409 `session-busy`）
+- 归档等破坏性操作仅 owner
+- 页面右下角注入分享面板；也可调 `POST /simple-auth/share`、`/simple-auth/unshare`
+
+| 项 | 默认 | 含义 |
+|---|---|---|
+| `usersFile` | `""` | 多用户 JSON；非空且有效时启用多用户 |
+| `aclFile` | `$DSH_HOME/simple-auth/acl.json` | 会话 owner / sharedWith |
+| `secretFile` | `$DSH_HOME/simple-auth/secret` | Cookie HMAC 密钥（自动生成） |
+| `legacyOwner` | `master` | 升级时未登记 owner 的存量会话归此用户 |
+
+**边界（必须知晓）：** 多用户只隔离会话可见性，不隔离 llama 凭据、bash、workspace、settings。分享会话等于分享能跑命令的 agent。
+
 ## 安全
 
 - 这是访问控制，不是 TLS、系统加固或「agent 等于远程代码执行」的替代品。拿到密钥就能驱动 agent。

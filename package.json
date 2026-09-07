@@ -1,7 +1,7 @@
 {
   "name": "dsh-simple-auth",
-  "version": "0.1.0",
-  "description": "Single shared-key login gate for DeepSeek Harness (dsh) web. No accounts, no first-visit bootstrap \u2014 set a key and every page, API, and WebSocket is closed until it is presented.",
+  "version": "0.2.0",
+  "description": "Shared-key login gate for DeepSeek Harness (dsh) with optional multi-user session ACL and sharing.",
   "type": "module",
   "license": "MIT",
   "repository": {

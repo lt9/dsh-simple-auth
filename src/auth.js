@@ -4,6 +4,11 @@ import { readFileSync } from 'node:fs'
 export const DEFAULTS = {
   keyEnv: 'DSH_SIMPLE_AUTH_KEY',
   keyFile: '',
+  usersFile: '',
+  aclFile: '',
+  secretFile: '',
+  authDir: '',
+  legacyOwner: 'master',
   cookieName: 'dsh_simple_auth',
   sessionTtl: 604800,
   cookieSecure: 'auto',
