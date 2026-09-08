@@ -1,6 +1,6 @@
 import { injectBoot } from './boot.js'
 import { readRequestBody } from './body.js'
-import { AclStore, scanSessionsToAcl, sessionCwdFromDisk } from './acl.js'
+import { AclStore, scanSessionsToAcl, sessionCwdFromDisk, sessionMetaFromDisk, sessionDisplayLabel } from './acl.js'
 import { SessionLocks } from './locks.js'
 import { createRpcGate, patchWsFrame } from './rpc-gate.js'
 import { elideHistoryPayload } from './history.js'
@@ -390,10 +390,16 @@ export function apply(ctx, rawConfig) {
       }
       const entry = state.acl.entry(sessionId)
       const isOwner = state.acl.isOwner(userId, sessionId)
+      const meta = sessionMetaFromDisk(sessionId)
+      const label = sessionDisplayLabel(meta, sessionId)
+      const sharedWith = isOwner ? entry?.sharedWith || [] : []
       json(res, 200, {
         owner: entry?.owner || '',
-        sharedWith: isOwner ? entry?.sharedWith || [] : [],
-        canShare: isOwner
+        sharedWith,
+        canShare: isOwner,
+        mutualAccess: !isOwner && state.acl.canView(userId, sessionId),
+        displayLabel: label,
+        blank: meta.blank === true
       })
       return
     }
@@ -424,6 +430,10 @@ export function apply(ctx, rawConfig) {
         pathname === '/simple-auth/share'
           ? state.acl.share(sessionId, userId, target)
           : state.acl.unshare(sessionId, userId, target)
+      if (!result.ok && result.alreadyShared) {
+        json(res, 409, result)
+        return
+      }
       json(res, result.ok ? 200 : 403, result)
       return
     }

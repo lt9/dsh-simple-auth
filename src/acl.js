@@ -81,6 +81,9 @@ export class AclStore {
     if (!e || e.owner !== ownerId) return { ok: false, error: 'forbidden' }
     if (targetUserId === ownerId) return { ok: true }
     const shared = new Set(e.sharedWith || [])
+    if (shared.has(targetUserId)) {
+      return { ok: false, error: 'already-shared', alreadyShared: true }
+    }
     shared.add(targetUserId)
     e.sharedWith = [...shared]
     this.save()
@@ -90,9 +93,18 @@ export class AclStore {
   unshare(sessionId, ownerId, targetUserId) {
     const e = this.entry(sessionId)
     if (!e || e.owner !== ownerId) return { ok: false, error: 'forbidden' }
-    e.sharedWith = (e.sharedWith || []).filter((id) => id !== targetUserId)
+    const prev = e.sharedWith || []
+    if (!prev.includes(targetUserId)) return { ok: true, unchanged: true }
+    e.sharedWith = prev.filter((id) => id !== targetUserId)
     this.save()
     return { ok: true }
+  }
+
+  /** True when owner already granted target access to this session. */
+  isSharedWith(sessionId, targetUserId) {
+    const e = this.entry(sessionId)
+    if (!e || !targetUserId) return false
+    return Array.isArray(e.sharedWith) && e.sharedWith.includes(targetUserId)
   }
 
   sharedWith(sessionId) {
@@ -160,7 +172,14 @@ function sessionIdFromDirName(name) {
 
 /** Read session cwd from on-disk session log header (for workspace grouping). */
 export function sessionCwdFromDisk(sessionId, root = join(dshHome(), 'sessions')) {
-  if (!sessionId || !existsSync(root)) return ''
+  const meta = sessionMetaFromDisk(sessionId, root)
+  return meta.cwd || ''
+}
+
+/** Read display metadata for share UI (title / blank / cwd). */
+export function sessionMetaFromDisk(sessionId, root = join(dshHome(), 'sessions')) {
+  const empty = { cwd: '', title: '', blank: true }
+  if (!sessionId || !existsSync(root)) return empty
   try {
     for (const project of readdirSync(root, { withFileTypes: true })) {
       if (!project.isDirectory()) continue
@@ -174,9 +193,7 @@ export function sessionCwdFromDisk(sessionId, root = join(dshHome(), 'sessions')
           const path = join(dir, name)
           if (!existsSync(path) || name.endsWith('.zstd')) continue
           try {
-            const head = readSync(path, 'utf8').split('\n')[0]
-            const line = JSON.parse(head)
-            if (line?.type === 'session' && line.header?.cwd) return String(line.header.cwd)
+            return parseSessionLogMeta(readSync(path, 'utf8'))
           } catch {
             /* fall through */
           }
@@ -184,9 +201,47 @@ export function sessionCwdFromDisk(sessionId, root = join(dshHome(), 'sessions')
       }
     }
   } catch {
-    return ''
+    return empty
   }
-  return ''
+  return empty
+}
+
+function parseSessionLogMeta(text) {
+  const meta = { cwd: '', title: '', blank: true }
+  const lines = String(text || '').split('\n')
+  for (const line of lines) {
+    if (!line.trim()) continue
+    let row
+    try {
+      row = JSON.parse(line)
+    } catch {
+      continue
+    }
+    if (row.type === 'session' && row.header) {
+      if (row.header.cwd) meta.cwd = String(row.header.cwd)
+      continue
+    }
+    const ev = row.event || row
+    if (!ev || typeof ev !== 'object') continue
+    if (ev.type === 'turn/start') meta.blank = false
+    if (ev.type === 'user/message' && ev.data?.source?.kind === 'user') meta.blank = false
+    if (ev.type === 'session/title' && ev.data?.title) {
+      meta.title = String(ev.data.title).trim()
+      meta.blank = false
+    }
+    if (!meta.blank && meta.title) break
+  }
+  return meta
+}
+
+export function sessionDisplayLabel(meta, sessionId) {
+  if (!meta || meta.blank) return '新会话'
+  if (meta.title) return meta.title
+  if (meta.cwd) {
+    const base = meta.cwd.replace(/[/\\]+$/, '').split(/[/\\]/).pop()
+    if (base) return base
+  }
+  return '未命名会话'
 }
 
 function decodeSegmentDirName(encoded) {

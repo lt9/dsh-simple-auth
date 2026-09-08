@@ -76,6 +76,20 @@ test('acl owner share and view', () => {
   acl.share('session-1', 'master', 'guest')
   assert.equal(acl.canView('guest', 'session-1'), true)
   assert.equal(acl.isOwner('guest', 'session-1'), false)
+  const dup = acl.share('session-1', 'master', 'guest')
+  assert.equal(dup.ok, false)
+  assert.equal(dup.alreadyShared, true)
+  assert.equal(acl.isSharedWith('session-1', 'guest'), true)
+})
+
+test('only owner can unshare', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-sa-'))
+  const acl = new AclStore(join(dir, 'acl.json'), 'master')
+  acl.setOwner('session-2', 'master')
+  acl.share('session-2', 'master', 'guest')
+  assert.equal(acl.unshare('session-2', 'guest', 'master').ok, false)
+  assert.equal(acl.unshare('session-2', 'master', 'guest').ok, true)
+  assert.equal(acl.isSharedWith('session-2', 'guest'), false)
 })
 
 test('rpc gate filters session.list items', () => {
