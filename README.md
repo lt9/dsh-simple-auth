@@ -8,6 +8,20 @@ This is the same shape as a private-dashboard API key: one secret, a login field
 
 [中文说明](README.zh.md)
 
+## Screenshots
+
+### Login
+
+Visitors enter the access key once; optional “remember key on this device”.
+
+![Login page](docs/screenshots/login.png)
+
+### Session sharing (multi-user)
+
+The share panel in the bottom-right targets the **currently selected sidebar session**. The owner can share with or revoke access for other users; guests can use the session but cannot manage sharing.
+
+![Session sharing](docs/screenshots/session-share.png)
+
 ## Requirements
 
 - Node.js ≥ 20
@@ -73,7 +87,7 @@ Never put the key itself in YAML or git.
 
 ## Multi-user session sharing (0.2+)
 
-When `usersFile` is set, each login key maps to a user `id` + `name`. Cookies sign `userId` with a separate `secret` file. Sessions are isolated by default; owners can share a session so both parties see the same `sessionId`. Concurrent `session.prompt` / `session.updateQueue` on one session returns `409 session-busy`.
+When `usersFile` is set, each login key maps to a user `id` + `name`. Cookies sign `userId` with a separate `secret` file. Sessions are isolated by default; owners can share the **active sidebar session** with other users. Shared users get mutual access but cannot share or unshare. Concurrent `session.prompt` / `session.updateQueue` on one session returns `409 session-busy`.
 
 **Limits:** credentials, bash, workspace, and settings remain machine-wide. Sharing a session shares the live agent, not chat text only.
 

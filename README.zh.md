@@ -8,6 +8,20 @@
 
 [English](README.md)
 
+## 截图
+
+### 登录页
+
+访客输入访问密钥进入；可选「在这台设备记住密钥」。
+
+![登录页](docs/screenshots/login.png)
+
+### 会话分享（多用户）
+
+右下角分享面板：针对**左侧当前选中的会话**，owner 可分享给其他用户或取消分享；被分享方双方均可访问，但不能再次分享或取消。
+
+![会话分享](docs/screenshots/session-share.png)
+
 ## 要求
 
 - Node.js ≥ 20
@@ -83,12 +97,13 @@ systemd / Docker 把同一变量写进 `Environment` / `EnvironmentFile`。若�
 ]
 ```
 
-`users.json` 是数组，可配置**任意多个访客**。每个用户独立 `id`、`name` 和密钥（`key` / `keyFile` / `keyEnv`）。分享面板会对所有非当前用户显示复选框，可多选。
+`users.json` 是数组，可配置**任意多个访客**。每个用户独立 `id`、`name` 和密钥（`key` / `keyFile` / `keyEnv`）。
 
 - 默认会话隔离：`session.list` / WebSocket 事件按 ACL 过滤
 - 分享后双方共用同一 `sessionId`；`session.prompt` / `session.updateQueue` 互斥（第二人 409 `session-busy`）
+- 仅会话 **owner** 可分享或取消分享；被分享方只能访问，不能管理分享关系
 - 归档等破坏性操作仅 owner
-- 页面右下角注入分享面板；也可调 `POST /simple-auth/share`、`/simple-auth/unshare`
+- 页面右下角注入分享面板（见上方截图）；也可调 `POST /simple-auth/share`、`/simple-auth/unshare`
 
 | 项 | 默认 | 含义 |
 |---|---|---|

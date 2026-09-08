@@ -15,6 +15,7 @@
   },
   "files": [
     "src",
+    "docs",
     "cordis.patch.yml",
     "README.md",
     "README.zh.md",
