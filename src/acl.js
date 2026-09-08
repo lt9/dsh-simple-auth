@@ -1,5 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { readdirSync, readFileSync as readSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import zlib from 'node:zlib'
 import { join } from 'node:path'
 import { dshHome } from './users.js'
 
@@ -146,17 +148,14 @@ export function scanSessionsToAcl(acl, legacyOwner, root = join(dshHome(), 'sess
 
 function sessionIdFromDir(dir) {
   const dirName = join(dir).split(/[/\\]/).pop() || ''
-  for (const name of ['session.jsonl', 'session.jsonl.zstd']) {
-    const path = join(dir, name)
-    if (!existsSync(path)) continue
-    if (name.endsWith('.zstd')) continue
-    try {
-      const head = readSync(path, 'utf8').split('\n')[0]
+  try {
+    const head = readSessionLogFromDir(dir, 8192).split('\n')[0]
+    if (head) {
       const line = JSON.parse(head)
       if (line && line.type === 'session' && line.id) return String(line.id)
-    } catch {
-      /* fall through */
     }
+  } catch {
+    /* fall through */
   }
   return sessionIdFromDirName(dirName)
 }
@@ -189,14 +188,11 @@ export function sessionMetaFromDisk(sessionId, root = join(dshHome(), 'sessions'
         const dir = join(projectPath, sess.name)
         const id = sessionIdFromDir(dir)
         if (id !== sessionId) continue
-        for (const name of ['session.jsonl', 'session.jsonl.zstd']) {
-          const path = join(dir, name)
-          if (!existsSync(path) || name.endsWith('.zstd')) continue
-          try {
-            return parseSessionLogMeta(readSync(path, 'utf8'))
-          } catch {
-            /* fall through */
-          }
+        try {
+          const text = readSessionLogFromDir(dir)
+          if (text) return parseSessionLogMeta(text)
+        } catch {
+          /* fall through */
         }
       }
     }
@@ -205,6 +201,52 @@ export function sessionMetaFromDisk(sessionId, root = join(dshHome(), 'sessions'
   }
   return empty
 }
+
+function readSessionLogFromDir(dir, maxBytes = 512 * 1024) {
+  const plain = join(dir, 'session.jsonl')
+  if (existsSync(plain)) {
+    try {
+      const text = readSync(plain, 'utf8')
+      return maxBytes > 0 ? text.slice(0, maxBytes) : text
+    } catch {
+      /* fall through */
+    }
+  }
+  const compressed = join(dir, 'session.jsonl.zstd')
+  if (existsSync(compressed)) return decompressZstdSessionLog(compressed, maxBytes)
+  return ''
+}
+
+function decompressZstdSessionLog(path, maxBytes = 512 * 1024) {
+  const cap = Math.max(8192, maxBytes || 512 * 1024)
+  const quoted = path.replace(/'/g, "'\\''")
+  // DSH appends one zstd frame per event; Node zlib only decompresses the first frame.
+  for (const shellCmd of [
+    `zstdcat '${quoted}' 2>/dev/null | head -c ${cap}`,
+    `zstd -d -c '${quoted}' 2>/dev/null | head -c ${cap}`
+  ]) {
+    const r = spawnSync('sh', ['-c', shellCmd], { encoding: 'utf8', maxBuffer: cap + 65536 })
+    if (r.stdout) return String(r.stdout).slice(0, cap)
+  }
+  try {
+    if (typeof zlib.zstdDecompressSync === 'function') {
+      const text = zlib.zstdDecompressSync(readSync(path)).toString('utf8')
+      return text.slice(0, cap)
+    }
+  } catch {
+    /* fall through */
+  }
+  return ''
+}
+
+const SESSION_LOG_META_ONLY = new Set([
+  'permission/preset',
+  'sandbox/mode',
+  'approval/policy',
+  'request/header',
+  'request/context',
+  'session/title-llm-request'
+])
 
 function parseSessionLogMeta(text) {
   const meta = { cwd: '', title: '', blank: true }
@@ -217,18 +259,32 @@ function parseSessionLogMeta(text) {
     } catch {
       continue
     }
-    if (row.type === 'session' && row.header) {
-      if (row.header.cwd) meta.cwd = String(row.header.cwd)
+    const ev = row.event && typeof row.event === 'object' ? row.event : row
+    const type = ev?.type
+    if (!type) continue
+
+    if (type === 'session') {
+      const cwd = ev.cwd || ev.header?.cwd
+      if (cwd) meta.cwd = String(cwd)
       continue
     }
-    const ev = row.event || row
-    if (!ev || typeof ev !== 'object') continue
-    if (ev.type === 'turn/start') meta.blank = false
-    if (ev.type === 'user/message' && ev.data?.source?.kind === 'user') meta.blank = false
-    if (ev.type === 'session/title' && ev.data?.title) {
+    if (type === 'session/title' && ev.data?.title) {
       meta.title = String(ev.data.title).trim()
       meta.blank = false
     }
+    if (type === 'turn/start' || type === 'step/start' || type === 'assistant/chunk') meta.blank = false
+    if (type === 'user/message' && ev.data?.source?.kind === 'user') meta.blank = false
+    if (type === 'agent/inbox/spliced' && Array.isArray(ev.data?.inserted)) {
+      for (const msg of ev.data.inserted) {
+        if (msg?.source?.kind === 'user') {
+          meta.blank = false
+          break
+        }
+      }
+    }
+    if (!meta.blank && meta.title) break
+    if (!meta.blank) continue
+    if (!SESSION_LOG_META_ONLY.has(type) && type !== 'session') meta.blank = false
     if (!meta.blank && meta.title) break
   }
   return meta

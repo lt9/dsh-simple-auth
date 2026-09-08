@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
@@ -12,7 +12,7 @@ import {
   RateLimiter,
   loadKey
 } from '../src/auth.js'
-import { AclStore } from '../src/acl.js'
+import { AclStore, sessionMetaFromDisk, sessionDisplayLabel } from '../src/acl.js'
 import { SessionLocks } from '../src/locks.js'
 import { createRpcGate, frameVisible, patchWsFrame } from '../src/rpc-gate.js'
 import {
@@ -90,6 +90,22 @@ test('only owner can unshare', () => {
   assert.equal(acl.unshare('session-2', 'guest', 'master').ok, false)
   assert.equal(acl.unshare('session-2', 'master', 'guest').ok, true)
   assert.equal(acl.isSharedWith('session-2', 'guest'), false)
+})
+
+test('sessionMetaFromDisk detects non-blank new-format logs', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-sa-'))
+  const root = join(dir, 'sessions', '--home-twan--', 'session-abc-123')
+  mkdirSync(root, { recursive: true })
+  const log = [
+    '{"type":"session","id":"session-abc-123","cwd":"/home/twan/gpu"}',
+    '{"type":"turn/start","seq":1,"data":{"turn":1}}',
+    '{"type":"session/title","seq":2,"data":{"title":"GPU_1_测试项目"}}'
+  ].join('\n')
+  writeFileSync(join(root, 'session.jsonl'), log)
+  const meta = sessionMetaFromDisk('session-abc-123', join(dir, 'sessions'))
+  assert.equal(meta.blank, false)
+  assert.equal(meta.title, 'GPU_1_测试项目')
+  assert.equal(sessionDisplayLabel(meta, 'session-abc-123'), 'GPU_1_测试项目')
 })
 
 test('rpc gate filters session.list items', () => {
