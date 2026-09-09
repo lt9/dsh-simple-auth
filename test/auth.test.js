@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
@@ -12,7 +12,7 @@ import {
   RateLimiter,
   loadKey
 } from '../src/auth.js'
-import { AclStore, sessionMetaFromDisk, sessionDisplayLabel } from '../src/acl.js'
+import { AclStore, sessionMetaFromDisk, sessionDisplayLabel, projcacheTitles, listVisibleSessionItems } from '../src/acl.js'
 import { SessionLocks } from '../src/locks.js'
 import { createRpcGate, frameVisible, patchWsFrame } from '../src/rpc-gate.js'
 import {
@@ -90,6 +90,33 @@ test('only owner can unshare', () => {
   assert.equal(acl.unshare('session-2', 'guest', 'master').ok, false)
   assert.equal(acl.unshare('session-2', 'master', 'guest').ok, true)
   assert.equal(acl.isSharedWith('session-2', 'guest'), false)
+})
+
+test('projcacheTitles prefers renamed UI titles', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-sa-'))
+  const file = join(dir, 'session_projcache.json')
+  writeFileSync(file, JSON.stringify({
+    tables: {
+      sessions: {
+        'session-abc-123': { rows: { title: { val: 'GPU_1_测试项目' } } }
+      }
+    }
+  }))
+  const titles = projcacheTitles(file)
+  assert.equal(titles['session-abc-123'], 'GPU_1_测试项目')
+  const acl = new AclStore(join(dir, 'acl.json'), 'master')
+  acl.setOwner('session-abc-123', 'master')
+  const origHome = process.env.DSH_HOME
+  process.env.DSH_HOME = dir
+  try {
+    mkdirSync(join(dir, 'storages'), { recursive: true })
+    writeFileSync(join(dir, 'storages', 'session_projcache.json'), readFileSync(file))
+    const items = listVisibleSessionItems(acl, 'master')
+    assert.equal(items[0].displayLabel, 'GPU_1_测试项目')
+  } finally {
+    if (origHome === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = origHome
+  }
 })
 
 test('sessionMetaFromDisk detects non-blank new-format logs', () => {

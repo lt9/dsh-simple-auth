@@ -1,6 +1,6 @@
 import { injectBoot } from './boot.js'
 import { readRequestBody } from './body.js'
-import { AclStore, scanSessionsToAcl, sessionCwdFromDisk, sessionMetaFromDisk, sessionDisplayLabel } from './acl.js'
+import { AclStore, scanSessionsToAcl, sessionCwdFromDisk, sessionMetaFromDisk, sessionDisplayLabel, listVisibleSessionItems, projcacheTitles } from './acl.js'
 import { SessionLocks } from './locks.js'
 import { createRpcGate, patchWsFrame } from './rpc-gate.js'
 import { elideHistoryPayload } from './history.js'
@@ -373,18 +373,7 @@ export function apply(ctx, rawConfig) {
       return
     }
     if (pathname === '/simple-auth/sessions' && (req.method === 'GET' || req.method === 'HEAD')) {
-      const items = []
-      for (const sessionId of Object.keys(state.acl.data.sessions || {})) {
-        if (!state.acl.canView(userId, sessionId)) continue
-        const meta = sessionMetaFromDisk(sessionId)
-        items.push({
-          sessionId,
-          displayLabel: sessionDisplayLabel(meta, sessionId),
-          blank: meta.blank === true,
-          canShare: state.acl.isOwner(userId, sessionId)
-        })
-      }
-      json(res, 200, { items })
+      json(res, 200, { items: listVisibleSessionItems(state.acl, userId) })
       return
     }
     if (pathname === '/simple-auth/session-acl' && (req.method === 'GET' || req.method === 'HEAD')) {
@@ -406,7 +395,8 @@ export function apply(ctx, rawConfig) {
       const entry = state.acl.entry(sessionId)
       const isOwner = state.acl.isOwner(userId, sessionId)
       const meta = sessionMetaFromDisk(sessionId)
-      const label = sessionDisplayLabel(meta, sessionId)
+      const titles = projcacheTitles()
+      const label = titles[sessionId] || sessionDisplayLabel(meta, sessionId)
       const sharedWith = isOwner ? entry?.sharedWith || [] : []
       json(res, 200, {
         owner: entry?.owner || '',
@@ -414,7 +404,7 @@ export function apply(ctx, rawConfig) {
         canShare: isOwner,
         mutualAccess: !isOwner && state.acl.canView(userId, sessionId),
         displayLabel: label,
-        blank: meta.blank === true
+        blank: meta.blank === true && !titles[sessionId]
       })
       return
     }
