@@ -39,10 +39,6 @@ export function sharePanelScript() {
     return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
   }
 
-  function uuid() {
-    return (crypto.randomUUID && crypto.randomUUID()) || ('rpc-' + Math.random().toString(16).slice(2));
-  }
-
   function normalizeSessionId(id) {
     if (!id) return '';
     var sid = String(id);
@@ -57,139 +53,23 @@ export function sharePanelScript() {
     try { sessionStorage.setItem('dsh_simple_auth_session', sid); } catch (e) {}
   }
 
-  function normLabel(s) {
-    return String(s || '')
-      .replace(/[\\t\\n\\r]+/g, ' ')
-      .replace(/\\s+/g, ' ')
-      .replace(/\\s*(刚刚|\\d+\\s*(秒|分钟|小时|天|周|月)前|\\d+\\s*(秒|分钟|小时|天))\\s*$/g, '')
-      .trim();
-  }
-
-  function readHeaderTitle() {
-    var nodes = document.querySelectorAll('h1, h2, header, [data-slot="title"]');
-    for (var i = 0; i < nodes.length; i++) {
-      var t = normLabel(nodes[i].textContent || '');
-      if (t && t !== '新会话' && t.length < 80 && t.indexOf('DeepSeek') < 0) return t;
-    }
-    return '';
-  }
-
-  function readSidebarSelection() {
-    var picked =
-      document.querySelector('[role="treeitem"][aria-selected="true"]') ||
-      document.querySelector('[role="option"][aria-selected="true"]') ||
-      document.querySelector('[aria-selected="true"]');
-    if (!picked) {
-      var tree = document.querySelector('[role="tree"][aria-label="会话"]') || document.querySelector('[role="tree"]');
-      if (tree) {
-        var items = tree.querySelectorAll('[role="treeitem"]');
-        for (var j = 0; j < items.length; j++) {
-          var el = items[j];
-          var t = (el.textContent || '').trim();
-          if (!t || t === '新会话') continue;
-          var cls = el.className && String(el.className);
-          if (cls && /(selected|active|current)/i.test(cls)) {
-            picked = el;
-            break;
-          }
-        }
-      }
-    }
-    if (!picked) return { label: readHeaderTitle(), el: null };
-    var label = (picked.textContent || '').trim().split('\\n')[0].trim();
-    return { label: label, el: picked };
-  }
-
-  function sessionIdFromTreeItem(el) {
-    if (!el) return '';
-    var probe = el;
-    for (var d = 0; d < 6 && probe; d++) {
-      var attrs = probe.getAttributeNames ? probe.getAttributeNames() : [];
-      for (var i = 0; i < attrs.length; i++) {
-        var v = probe.getAttribute(attrs[i]) || '';
-        var m = String(v).match(/session-[0-9a-f]{8}-[0-9a-f-]{27}/i) || String(v).match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
-        if (m) return normalizeSessionId(m[0]);
-      }
-      if (probe.id) {
-        var idm = String(probe.id).match(/session-[0-9a-f-]{36}/i);
-        if (idm) return normalizeSessionId(idm[0]);
-      }
-      probe = probe.parentElement;
-    }
-    var html = el.outerHTML || el.innerHTML || '';
-    var hm = html.match(/session-[0-9a-f]{8}-[0-9a-f-]{27}/i);
-    return hm ? normalizeSessionId(hm[0]) : '';
-  }
-
-  function labelsClose(a, b) {
-    var x = normLabel(a);
-    var y = normLabel(b);
-    if (!x || !y) return false;
-    if (x === y) return true;
-    if (x.indexOf(y) >= 0 || y.indexOf(x) >= 0) return true;
-    var n = Math.min(12, x.length, y.length);
-    return n >= 4 && x.slice(0, n) === y.slice(0, n);
-  }
-
-  function matchSessionIdByLabel(label) {
-    if (!label || !state.sessionItems.length) return '';
-    var want = normLabel(label);
-    if (!want) return '';
-    var best = '';
-    var bestLen = 0;
-    for (var i = 0; i < state.sessionItems.length; i++) {
-      var row = state.sessionItems[i];
-      if (!row || !row.sessionId) continue;
-      var candidates = [row.title, row.displayLabel, row.name, row.displayName, row.label, row.summary].filter(Boolean);
-      for (var j = 0; j < candidates.length; j++) {
-        var got = normLabel(candidates[j]);
-        if (!got || got === '新会话') continue;
-        if (labelsClose(want, got) && got.length >= bestLen) {
-          best = normalizeSessionId(row.sessionId);
-          bestLen = got.length;
-        }
-      }
-    }
-    return best;
-  }
-
-  function findSessionIdDeep(obj, depth) {
-    if (obj == null || depth > 5) return '';
-    if (typeof obj === 'string') {
-      var m = obj.match(/session-[0-9a-f]{8}-[0-9a-f-]{27}/i);
-      return m ? normalizeSessionId(m[0]) : '';
-    }
-    if (typeof obj !== 'object') return '';
-    if (obj.sessionId) return normalizeSessionId(obj.sessionId);
-    if (Array.isArray(obj)) return '';
-    var keys = ['payload', 'params', 'result', 'value', 'data', 'session'];
-    for (var k = 0; k < keys.length; k++) {
-      if (obj[keys[k]]) {
-        var nested = findSessionIdDeep(obj[keys[k]], depth + 1);
-        if (nested) return nested;
-      }
-    }
+  function rpcSessionId(obj) {
+    if (!obj || typeof obj !== 'object') return '';
+    var payload = obj.payload && typeof obj.payload === 'object' ? obj.payload : obj;
+    if (payload.sessionId) return normalizeSessionId(payload.sessionId);
+    if (payload.parentSessionId && !payload.sessionId) return normalizeSessionId(payload.parentSessionId);
     return '';
   }
 
   function ingestSessionList(items) {
     if (!Array.isArray(items)) return;
-    state.sessionItems = items.map(function (row) {
-      if (!row || !row.sessionId) return row;
-      return {
-        sessionId: row.sessionId,
-        title: row.displayLabel || row.title || row.name,
-        displayLabel: row.displayLabel || row.title || row.name,
-        blank: row.blank
-      };
-    }).filter(function (row) { return row && row.sessionId; });
-    var sel = readSidebarSelection();
-    var sid = sessionIdFromTreeItem(sel.el) || matchSessionIdByLabel(sel.label) || matchSessionIdByLabel(readHeaderTitle());
-    if (sid) rememberSession(sid);
+    state.sessionItems = items.filter(function (row) { return row && row.sessionId; });
   }
 
-  function extractSessionIdFromRpc(msg) {
-    return findSessionIdDeep(msg, 0);
+  function catalogLabel(sessionId) {
+    var row = state.sessionItems.find(function (x) { return x.sessionId === sessionId; });
+    if (!row) return '';
+    return String(row.displayLabel || row.title || row.name || '').trim();
   }
 
   async function fetchSessionList() {
@@ -197,43 +77,24 @@ export function sharePanelScript() {
       var r = await fetch('/simple-auth/sessions', { credentials: 'same-origin' });
       if (r.ok) {
         var data = await r.json();
-        if (data && Array.isArray(data.items) && data.items.length) {
-          ingestSessionList(data.items);
-          return state.sessionItems;
-        }
+        if (data && Array.isArray(data.items)) ingestSessionList(data.items);
       }
     } catch (e) {}
-    try {
-      var r2 = await fetch('/api/session.list', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'client-request', rpcId: uuid(), payload: {} })
-      });
-      if (!r2.ok) return state.sessionItems;
-      var data2 = await r2.json();
-      var items = data2 && data2.result && data2.result.ok && data2.result.value && data2.result.value.items;
-      if (Array.isArray(items)) ingestSessionList(items);
-      return state.sessionItems;
-    } catch (e) {
-      return state.sessionItems;
-    }
+    return state.sessionItems;
   }
 
   async function resolveSessionId() {
-    var sel = readSidebarSelection();
-    state.sidebarLabel = sel.label || readHeaderTitle();
-    var fromDom = sessionIdFromTreeItem(sel.el);
-    if (fromDom) {
-      rememberSession(fromDom);
-      return fromDom;
-    }
-    await fetchSessionList();
-    var fromLabel = matchSessionIdByLabel(state.sidebarLabel) || matchSessionIdByLabel(readHeaderTitle());
-    if (fromLabel) {
-      rememberSession(fromLabel);
-      return fromLabel;
-    }
+    try {
+      var r = await fetch('/simple-auth/current-session', { credentials: 'same-origin' });
+      if (r.ok) {
+        var data = await r.json();
+        if (data && data.sessionId) {
+          rememberSession(data.sessionId);
+          state.acl = data;
+          return data.sessionId;
+        }
+      }
+    } catch (e) {}
     if (state.sessionId) return state.sessionId;
     try {
       var stored = sessionStorage.getItem('dsh_simple_auth_session') || '';
@@ -253,9 +114,12 @@ export function sharePanelScript() {
         var url = typeof input === 'string' ? input : (input && input.url) || '';
         try {
           var body = init && init.body;
+          if (body && typeof body !== 'string' && body.byteLength) {
+            body = new TextDecoder().decode(body);
+          }
           if (typeof body === 'string' && url.indexOf('/api/') >= 0) {
             var req = JSON.parse(body);
-            var reqSid = extractSessionIdFromRpc(req);
+            var reqSid = rpcSessionId(req);
             if (reqSid) rememberSession(reqSid);
           }
         } catch (e) {}
@@ -263,8 +127,6 @@ export function sharePanelScript() {
           try {
             if (url.indexOf('/api/') < 0) return res;
             return res.clone().json().then(function (data) {
-              var sid = extractSessionIdFromRpc(data);
-              if (sid) rememberSession(sid);
               if (url.indexOf('session.list') >= 0 && data.result && data.result.value && data.result.value.items) {
                 ingestSessionList(data.result.value.items);
               }
@@ -286,7 +148,7 @@ export function sharePanelScript() {
           try {
             if (typeof data === 'string') {
               var msg = JSON.parse(data);
-              var sid = extractSessionIdFromRpc(msg);
+              var sid = rpcSessionId(msg);
               if (sid) rememberSession(sid);
             }
           } catch (e) {}
@@ -296,7 +158,7 @@ export function sharePanelScript() {
           try {
             if (typeof ev.data === 'string') {
               var msg = JSON.parse(ev.data);
-              var sid = extractSessionIdFromRpc(msg);
+              var sid = rpcSessionId(msg);
               if (sid) rememberSession(sid);
             }
           } catch (e) {}
@@ -309,24 +171,6 @@ export function sharePanelScript() {
       window.WebSocket.CLOSING = OrigWS.CLOSING;
       window.WebSocket.CLOSED = OrigWS.CLOSED;
     }
-  }
-
-  function watchSidebar() {
-    if (document.__dshSaWatch) return;
-    document.__dshSaWatch = true;
-    var timer = null;
-    var bump = function () {
-      if (timer) return;
-      timer = setTimeout(function () {
-        timer = null;
-        var sel = readSidebarSelection();
-        state.sidebarLabel = sel.label;
-        var sid = sessionIdFromTreeItem(sel.el) || matchSessionIdByLabel(sel.label) || matchSessionIdByLabel(readHeaderTitle());
-        if (sid) rememberSession(sid);
-      }, 120);
-    };
-    new MutationObserver(bump).observe(document.documentElement, { subtree: true, attributes: true, childList: true, attributeFilter: ['aria-selected', 'aria-current', 'class', 'data-state'] });
-    document.addEventListener('click', bump, true);
   }
 
   async function loadSessionAcl(sessionId) {
@@ -513,7 +357,6 @@ export function sharePanelScript() {
     });
 
     hookTransports();
-    watchSidebar();
     boot();
   }
 
@@ -528,25 +371,22 @@ export function sharePanelScript() {
     if (meEl) meEl.textContent = '当前用户：' + (state.me.name || state.me.id);
     if (!body) return;
 
-    var sel = readSidebarSelection();
-    state.sidebarLabel = sel.label;
     var sid = await resolveSessionId();
     if (!sid) {
       body.innerHTML =
-        '<div style="color:#666">未能识别当前会话。</div>' +
-        '<div style="color:#888;font-size:12px;margin-top:6px">请在左侧点击一个会话后再试；若仍无效请刷新页面。</div>';
+        '<div style="color:#666">还没有捕获到当前会话。</div>' +
+        '<div style="color:#888;font-size:12px;margin-top:6px">DSH 打开会话时会带上 sessionId；请点一次左侧会话（或等对话加载完成）后再分享。</div>';
       return;
     }
     rememberSession(sid);
 
-    var acl = await loadSessionAcl(sid);
+    var acl = state.acl && state.acl.sessionId === sid ? state.acl : await loadSessionAcl(sid);
     if (!acl) {
       body.innerHTML = '<div style="color:#b91c1c">无法读取当前会话权限，请刷新后重试。</div>';
       return;
     }
 
-    var label = acl.displayLabel || state.sidebarLabel || '当前会话';
-    if (state.sidebarLabel && state.sidebarLabel !== '新会话' && label === '新会话') label = state.sidebarLabel;
+    var label = acl.displayLabel || catalogLabel(sid) || '当前会话';
 
     if (acl.mutualAccess && !acl.canShare) {
       body.innerHTML =
@@ -613,14 +453,10 @@ export function sharePanelScript() {
         return;
       }
       state.me = await meR.json();
+      if (state.me && state.me.currentSessionId) rememberSession(state.me.currentSessionId);
       var usersR = await fetch('/simple-auth/users', { credentials: 'same-origin' });
       if (usersR.ok) state.users = await usersR.json();
       await fetchSessionList();
-      watchSidebar();
-      var sel = readSidebarSelection();
-      state.sidebarLabel = sel.label;
-      var sid = sessionIdFromTreeItem(sel.el) || matchSessionIdByLabel(sel.label);
-      if (sid) rememberSession(sid);
     } catch (e) {}
     if (state.panelOpen) render();
   }

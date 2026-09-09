@@ -100,6 +100,7 @@ systemd / Docker 把同一变量写进 `Environment` / `EnvironmentFile`。若�
 `users.json` 是数组，可配置**任意多个访客**。每个用户独立 `id`、`name` 和密钥（`key` / `keyFile` / `keyEnv`）。
 
 - 默认会话隔离：`session.list` / WebSocket 事件按 ACL 过滤
+- **当前会话**以 DSH RPC 信封里的 `payload.sessionId` 为准（`session.history` / `session.prompt` 等），标题来自官方 `session.list`，不解析会话日志
 - 分享后双方共用同一 `sessionId`；`session.prompt` / `session.updateQueue` 互斥（第二人 409 `session-busy`）
 - 仅会话 **owner** 可分享或取消分享；被分享方只能访问，不能管理分享关系
 - 归档等破坏性操作仅 owner

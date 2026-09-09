@@ -87,7 +87,7 @@ Never put the key itself in YAML or git.
 
 ## Multi-user session sharing (0.2+)
 
-When `usersFile` is set, each login key maps to a user `id` + `name`. Cookies sign `userId` with a separate `secret` file. Sessions are isolated by default; owners can share the **active sidebar session** with other users. Shared users get mutual access but cannot share or unshare. Concurrent `session.prompt` / `session.updateQueue` on one session returns `409 session-busy`.
+When `usersFile` is set, each login key maps to a user `id` + `name`. Cookies sign `userId` with a separate `secret` file. Sessions are isolated by default; the **current session** is the `sessionId` from DSH RPC (`session.history` / `session.prompt`, etc.), and titles come from official `session.list`. Owners can share that session. Shared users get mutual access but cannot share or unshare. Concurrent `session.prompt` / `session.updateQueue` on one session returns `409 session-busy`.
 
 **Limits:** credentials, bash, workspace, and settings remain machine-wide. Sharing a session shares the live agent, not chat text only.
 

@@ -98,12 +98,25 @@ function filterWorkspaceList(value, userId, acl, sessionItems = [], cwdOf) {
   return { ...value, items, archivedSessionIds: archived }
 }
 
-/** Last session.list items per user — used to align workspace.list grouping. */
+/** Last session.list items per user — official catalog for titles/cwd, and workspace grouping. */
 const sessionListCache = new Map()
 
 export function clearSessionListCache(userId) {
   if (userId) sessionListCache.delete(userId)
   else sessionListCache.clear()
+}
+
+export function getSessionListCache(userId) {
+  return sessionListCache.get(userId) || []
+}
+
+export function cwdFromSessionListCache(sessionId) {
+  if (!sessionId) return ''
+  for (const items of sessionListCache.values()) {
+    const row = Array.isArray(items) ? items.find((item) => item?.sessionId === sessionId) : null
+    if (row?.cwd) return String(row.cwd)
+  }
+  return ''
 }
 
 function patchResponse(method, payload, userId, acl, legacyOwner, cwdOf) {
@@ -149,7 +162,7 @@ function busyRpc(res, rpcId, owner) {
   denyRpc(res, rpcId, 409, 'session-busy', 'session is busy', { owner })
 }
 
-export function createRpcGate({ acl, locks, legacyOwner, cwdOf }) {
+export function createRpcGate({ acl, locks, legacyOwner, cwdOf, focus }) {
   return {
     methodFromPath: rpcMethodFromPath,
     parseEnvelope,
@@ -158,6 +171,7 @@ export function createRpcGate({ acl, locks, legacyOwner, cwdOf }) {
     checkRequest(method, envelope, userId) {
       const payload = envelope?.payload
       const sessionId = sessionIdFromPayload(method, payload)
+      if (sessionId && focus && acl.canView(userId, sessionId)) focus.note(userId, sessionId, method)
 
       if (method === 'session.create') return { allow: true }
       if (method === 'session.list' || method === 'session.search') return { allow: true }
@@ -207,11 +221,17 @@ export function createRpcGate({ acl, locks, legacyOwner, cwdOf }) {
     onResponse(method, envelope, userId, rawPayload) {
       if (method === 'session.create') {
         const sid = rawPayload?.result?.value?.sessionId
-        if (rawPayload?.result?.ok && sid) acl.setOwner(String(sid), userId)
+        if (rawPayload?.result?.ok && sid) {
+          acl.setOwner(String(sid), userId)
+          if (focus) focus.note(userId, String(sid), method)
+        }
       }
       if (method === 'session.fork') {
         const sid = rawPayload?.result?.value?.sessionId
-        if (rawPayload?.result?.ok && sid) acl.setOwner(String(sid), userId)
+        if (rawPayload?.result?.ok && sid) {
+          acl.setOwner(String(sid), userId)
+          if (focus) focus.note(userId, String(sid), method)
+        }
       }
       const patched = patchResponse(method, rawPayload, userId, acl, legacyOwner, cwdOf)
       if (method === 'session.list' && patched?.result?.ok && Array.isArray(patched?.result?.value?.items)) {
@@ -253,7 +273,7 @@ function wrapFrame(obj, nextPayload) {
 }
 
 /** Patch or drop one server→client WebSocket JSON frame for multi-user ACL. */
-export function patchWsFrame(obj, userId, acl) {
+export function patchWsFrame(obj, userId, acl, focus) {
   if (!obj || typeof obj !== 'object') return null
   const payload = obj.payload && typeof obj.payload === 'object' ? obj.payload : obj
   const type = frameType(obj)
@@ -279,6 +299,7 @@ export function patchWsFrame(obj, userId, acl) {
 
   const sessionId = extractSessionIdFromFrame(obj)
   if (sessionId && sessionId !== '__archive__' && !acl.canView(userId, sessionId)) return null
+  if (sessionId && sessionId !== '__archive__' && focus) focus.note(userId, sessionId, type)
   return obj
 }
 

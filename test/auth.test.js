@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
@@ -12,9 +12,10 @@ import {
   RateLimiter,
   loadKey
 } from '../src/auth.js'
-import { AclStore, sessionMetaFromDisk, sessionDisplayLabel, projcacheTitles, listVisibleSessionItems } from '../src/acl.js'
+import { AclStore, sessionMetaFromDisk, sessionDisplayLabel } from '../src/acl.js'
 import { SessionLocks } from '../src/locks.js'
 import { createRpcGate, frameVisible, patchWsFrame } from '../src/rpc-gate.js'
+import { SessionFocus, catalogFromList, isFocusMethod } from '../src/focus.js'
 import {
   loadUsers,
   matchUserByKey,
@@ -92,31 +93,36 @@ test('only owner can unshare', () => {
   assert.equal(acl.isSharedWith('session-2', 'guest'), false)
 })
 
-test('projcacheTitles prefers renamed UI titles', () => {
+test('session focus follows RPC sessionId not session.list', () => {
   const dir = mkdtempSync(join(tmpdir(), 'dsh-sa-'))
-  const file = join(dir, 'session_projcache.json')
-  writeFileSync(file, JSON.stringify({
-    tables: {
-      sessions: {
-        'session-abc-123': { rows: { title: { val: 'GPU_1_测试项目' } } }
-      }
-    }
-  }))
-  const titles = projcacheTitles(file)
-  assert.equal(titles['session-abc-123'], 'GPU_1_测试项目')
   const acl = new AclStore(join(dir, 'acl.json'), 'master')
-  acl.setOwner('session-abc-123', 'master')
-  const origHome = process.env.DSH_HOME
-  process.env.DSH_HOME = dir
-  try {
-    mkdirSync(join(dir, 'storages'), { recursive: true })
-    writeFileSync(join(dir, 'storages', 'session_projcache.json'), readFileSync(file))
-    const items = listVisibleSessionItems(acl, 'master')
-    assert.equal(items[0].displayLabel, 'GPU_1_测试项目')
-  } finally {
-    if (origHome === undefined) delete process.env.DSH_HOME
-    else process.env.DSH_HOME = origHome
-  }
+  acl.setOwner('session-1', 'master')
+  const locks = new SessionLocks()
+  const focus = new SessionFocus()
+  const gate = createRpcGate({ acl, locks, legacyOwner: 'master', focus })
+  gate.checkRequest('session.list', { payload: {} }, 'master')
+  assert.equal(focus.current('master'), null)
+  gate.checkRequest('session.history', { payload: { sessionId: 'session-1' } }, 'master')
+  assert.equal(focus.current('master').sessionId, 'session-1')
+  assert.equal(isFocusMethod('session.list'), false)
+  assert.equal(isFocusMethod('session.history'), true)
+})
+
+test('catalogFromList uses official session.list titles', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-sa-'))
+  const acl = new AclStore(join(dir, 'acl.json'), 'master')
+  acl.setOwner('session-1', 'master')
+  acl.setOwner('session-secret', 'guest')
+  const items = catalogFromList(
+    [
+      { sessionId: 'session-1', title: 'GPU_1_测试项目', blank: false },
+      { sessionId: 'session-secret', title: 'hidden', blank: false }
+    ],
+    'master',
+    acl
+  )
+  assert.equal(items.length, 1)
+  assert.equal(items[0].displayLabel, 'GPU_1_测试项目')
 })
 
 test('sessionMetaFromDisk detects non-blank new-format logs', () => {

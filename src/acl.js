@@ -289,43 +289,6 @@ function parseSessionLogMeta(text) {
   return meta
 }
 
-/** UI titles from DSH session_projcache (includes user-renamed names). */
-export function projcacheTitles(file = join(dshHome(), 'storages', 'session_projcache.json')) {
-  const out = {}
-  if (!existsSync(file)) return out
-  try {
-    const data = JSON.parse(readFileSync(file, 'utf8'))
-    const sessions = data?.tables?.sessions
-    if (!sessions || typeof sessions !== 'object') return out
-    for (const [rawId, rec] of Object.entries(sessions)) {
-      const val = rec?.rows?.title?.val
-      if (!val) continue
-      const id = String(rawId).startsWith('session-') ? String(rawId) : `session-${rawId}`
-      out[id] = String(val).trim()
-    }
-  } catch {
-    return out
-  }
-  return out
-}
-
-export function listVisibleSessionItems(acl, userId) {
-  const titles = projcacheTitles()
-  const items = []
-  for (const sessionId of Object.keys(acl.data.sessions || {})) {
-    if (!acl.canView(userId, sessionId)) continue
-    const meta = sessionMetaFromDisk(sessionId)
-    const displayLabel = titles[sessionId] || sessionDisplayLabel(meta, sessionId)
-    items.push({
-      sessionId,
-      displayLabel,
-      blank: meta.blank === true && !titles[sessionId],
-      canShare: acl.isOwner(userId, sessionId)
-    })
-  }
-  return items
-}
-
 export function sessionDisplayLabel(meta, sessionId) {
   if (!meta || meta.blank) return '新会话'
   if (meta.title) return meta.title

@@ -1,11 +1,12 @@
 import { injectBoot } from './boot.js'
 import { readRequestBody } from './body.js'
-import { AclStore, scanSessionsToAcl, sessionCwdFromDisk, sessionMetaFromDisk, sessionDisplayLabel, listVisibleSessionItems, projcacheTitles } from './acl.js'
+import { AclStore, scanSessionsToAcl, sessionCwdFromDisk } from './acl.js'
 import { SessionLocks } from './locks.js'
-import { createRpcGate, patchWsFrame } from './rpc-gate.js'
+import { createRpcGate, patchWsFrame, getSessionListCache, cwdFromSessionListCache } from './rpc-gate.js'
 import { elideHistoryPayload } from './history.js'
 import { renderLoginPage } from './login-page.js'
 import { installWsFilter } from './ws-filter.js'
+import { SessionFocus, catalogFromList, catalogLabel, findCatalogRow } from './focus.js'
 import {
   DEFAULTS,
   RateLimiter,
@@ -213,6 +214,23 @@ function tokenQueryCount(req) {
   }
 }
 
+function sessionAclPayload(state, userId, sessionId, method) {
+  const entry = state.acl.entry(sessionId)
+  const isOwner = state.acl.isOwner(userId, sessionId)
+  const row = findCatalogRow(getSessionListCache(userId), sessionId)
+  const sharedWith = isOwner ? entry?.sharedWith || [] : []
+  return {
+    sessionId,
+    owner: entry?.owner || '',
+    sharedWith,
+    canShare: isOwner,
+    mutualAccess: !isOwner && state.acl.canView(userId, sessionId),
+    displayLabel: catalogLabel(row) || row?.displayLabel || '',
+    blank: row?.blank === true,
+    method: method || ''
+  }
+}
+
 function createAuthState(config) {
   const paths = defaultPaths(config)
   ensureDir(paths.dir)
@@ -223,15 +241,17 @@ function createAuthState(config) {
   const legacyOwner = String(config.legacyOwner || DEFAULTS.legacyOwner).trim() || 'master'
   const acl = new AclStore(paths.aclFile, legacyOwner)
   const locks = new SessionLocks()
+  const focus = new SessionFocus()
   const rpc = createRpcGate({
     acl,
     locks,
     legacyOwner,
-    cwdOf: (sessionId) => sessionCwdFromDisk(sessionId)
+    focus,
+    cwdOf: (sessionId) => cwdFromSessionListCache(sessionId) || sessionCwdFromDisk(sessionId)
   })
   if (multiUser) scanSessionsToAcl(acl, legacyOwner)
   const ready = multiUser ? users.length > 0 : Boolean(legacyKey)
-  return { paths, users, multiUser, legacyKey, secret, legacyOwner, acl, locks, rpc, ready }
+  return { paths, users, multiUser, legacyKey, secret, legacyOwner, acl, locks, rpc, focus, ready }
 }
 
 function resolveIdentity(req, config, state) {
@@ -365,7 +385,11 @@ export function apply(ctx, rawConfig) {
     }
     if (pathname === '/simple-auth/me' && (req.method === 'GET' || req.method === 'HEAD')) {
       const user = findUser(state.users, userId)
-      json(res, 200, user ? { id: user.id, name: user.name } : { id: userId, name: userId })
+      const focus = state.focus.current(userId)
+      json(res, 200, {
+        ...(user ? { id: user.id, name: user.name } : { id: userId, name: userId }),
+        currentSessionId: focus?.sessionId || ''
+      })
       return
     }
     if (pathname === '/simple-auth/users' && (req.method === 'GET' || req.method === 'HEAD')) {
@@ -373,7 +397,17 @@ export function apply(ctx, rawConfig) {
       return
     }
     if (pathname === '/simple-auth/sessions' && (req.method === 'GET' || req.method === 'HEAD')) {
-      json(res, 200, { items: listVisibleSessionItems(state.acl, userId) })
+      json(res, 200, { items: catalogFromList(getSessionListCache(userId), userId, state.acl) })
+      return
+    }
+    if (pathname === '/simple-auth/current-session' && (req.method === 'GET' || req.method === 'HEAD')) {
+      const focus = state.focus.current(userId)
+      const sessionId = focus?.sessionId || ''
+      if (!sessionId || !state.acl.canView(userId, sessionId)) {
+        json(res, 200, { sessionId: '', owner: '', canShare: false, blank: false, displayLabel: '' })
+        return
+      }
+      json(res, 200, sessionAclPayload(state, userId, sessionId, focus?.method || ''))
       return
     }
     if (pathname === '/simple-auth/session-acl' && (req.method === 'GET' || req.method === 'HEAD')) {
@@ -392,20 +426,7 @@ export function apply(ctx, rawConfig) {
         json(res, 403, { error: 'forbidden' })
         return
       }
-      const entry = state.acl.entry(sessionId)
-      const isOwner = state.acl.isOwner(userId, sessionId)
-      const meta = sessionMetaFromDisk(sessionId)
-      const titles = projcacheTitles()
-      const label = titles[sessionId] || sessionDisplayLabel(meta, sessionId)
-      const sharedWith = isOwner ? entry?.sharedWith || [] : []
-      json(res, 200, {
-        owner: entry?.owner || '',
-        sharedWith,
-        canShare: isOwner,
-        mutualAccess: !isOwner && state.acl.canView(userId, sessionId),
-        displayLabel: label,
-        blank: meta.blank === true && !titles[sessionId]
-      })
+      json(res, 200, sessionAclPayload(state, userId, sessionId, ''))
       return
     }
     if ((pathname === '/simple-auth/share' || pathname === '/simple-auth/unshare') && req.method === 'POST') {
@@ -559,7 +580,7 @@ export function apply(ctx, rawConfig) {
     const pathname = pathnameOf(req)
     if (state.multiUser && (pathname === MUX_PATH || pathname === HOST_PATH)) {
       const identity = resolveIdentity(req, config, state)
-      installWsFilter(socket, (obj) => patchWsFrame(obj, identity.userId, state.acl))
+      installWsFilter(socket, (obj) => patchWsFrame(obj, identity.userId, state.acl, state.focus))
     }
     rewriteLoopback(req, loopbackAuthority)
     downstream()
