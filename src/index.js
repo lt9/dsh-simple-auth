@@ -372,6 +372,21 @@ export function apply(ctx, rawConfig) {
       json(res, 200, publicUsers(state.users))
       return
     }
+    if (pathname === '/simple-auth/sessions' && (req.method === 'GET' || req.method === 'HEAD')) {
+      const items = []
+      for (const sessionId of Object.keys(state.acl.data.sessions || {})) {
+        if (!state.acl.canView(userId, sessionId)) continue
+        const meta = sessionMetaFromDisk(sessionId)
+        items.push({
+          sessionId,
+          displayLabel: sessionDisplayLabel(meta, sessionId),
+          blank: meta.blank === true,
+          canShare: state.acl.isOwner(userId, sessionId)
+        })
+      }
+      json(res, 200, { items })
+      return
+    }
     if (pathname === '/simple-auth/session-acl' && (req.method === 'GET' || req.method === 'HEAD')) {
       let sessionId = ''
       try {

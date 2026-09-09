@@ -24,7 +24,16 @@ export function sharePanelScript() {
   if (window.__dshSimpleAuthUi) return;
   window.__dshSimpleAuthUi = true;
 
-  var state = { me: null, users: [], sessionId: '', panelOpen: false, acl: null, sidebarLabel: '' };
+  var state = {
+    me: null,
+    users: [],
+    sessionId: '',
+    sessionItems: [],
+    menuOpen: false,
+    panelOpen: false,
+    acl: null,
+    sidebarLabel: ''
+  };
 
   function esc(s) {
     return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
@@ -48,22 +57,165 @@ export function sharePanelScript() {
     try { sessionStorage.setItem('dsh_simple_auth_session', sid); } catch (e) {}
   }
 
-  function readSidebarLabel() {
-    var tree = document.querySelector('[role="tree"][aria-label="会话"]');
-    if (!tree) return '';
-    var picked = tree.querySelector('[role="treeitem"][aria-selected="true"]');
-    if (!picked) return '';
-    var t = (picked.textContent || '').trim().split('\\n')[0].trim();
-    if (!t || t === '新会话') return t;
-    return t;
+  function normLabel(s) {
+    return String(s || '').replace(/\\s*\\d+\\s*小时$/, '').trim();
   }
 
-  function activeSessionId() {
-    if (state.sessionId) return state.sessionId;
+  function readSidebarSelection() {
+    var tree = document.querySelector('[role="tree"][aria-label="会话"]');
+    if (!tree) return { label: '', el: null };
+    var selectors = [
+      '[role="treeitem"][aria-selected="true"]',
+      '[role="treeitem"][aria-current="true"]',
+      '[role="treeitem"][data-state="selected"]',
+      '[role="treeitem"][data-active="true"]'
+    ];
+    var picked = null;
+    for (var i = 0; i < selectors.length; i++) {
+      picked = tree.querySelector(selectors[i]);
+      if (picked) break;
+    }
+    if (!picked) {
+      var items = tree.querySelectorAll('[role="treeitem"]');
+      for (var j = 0; j < items.length; j++) {
+        var el = items[j];
+        var t = (el.textContent || '').trim();
+        if (!t || t === '新会话') continue;
+        var cs = window.getComputedStyle(el);
+        var bg = cs.backgroundColor;
+        if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent' && el.offsetHeight > 0) {
+          if (!picked) picked = el;
+        }
+      }
+    }
+    if (!picked) return { label: '', el: null };
+    var label = (picked.textContent || '').trim().split('\\n')[0].trim();
+    return { label: label, el: picked };
+  }
+
+  function sessionIdFromTreeItem(el) {
+    if (!el) return '';
+    var attrs = ['data-session-id', 'data-sessionid', 'data-session', 'data-id'];
+    for (var i = 0; i < attrs.length; i++) {
+      var v = el.getAttribute(attrs[i]);
+      if (v && String(v).indexOf('session') >= 0) return normalizeSessionId(v);
+    }
+    var probe = el;
+    for (var d = 0; d < 4 && probe; d++) {
+      if (probe.id && probe.id.indexOf('session-') >= 0) return normalizeSessionId(probe.id);
+      probe = probe.parentElement;
+    }
+    var html = el.innerHTML || '';
+    var m = html.match(/session-[0-9a-f-]{36}/i);
+    if (m) return normalizeSessionId(m[0]);
+    return '';
+  }
+
+  function matchSessionIdByLabel(label) {
+    if (!label || !state.sessionItems.length) return '';
+    var want = normLabel(label);
+    for (var i = 0; i < state.sessionItems.length; i++) {
+      var row = state.sessionItems[i];
+      if (!row || !row.sessionId) continue;
+      var candidates = [row.title, row.name, row.displayName, row.label, row.summary].filter(Boolean);
+      for (var j = 0; j < candidates.length; j++) {
+        var got = normLabel(candidates[j]);
+        if (!got) continue;
+        if (got === want || want.indexOf(got) >= 0 || got.indexOf(want) >= 0) {
+          return normalizeSessionId(row.sessionId);
+        }
+      }
+    }
+    return '';
+  }
+
+  function ingestSessionList(items) {
+    if (!Array.isArray(items)) return;
+    state.sessionItems = items.map(function (row) {
+      if (!row || !row.sessionId) return row;
+      return {
+        sessionId: row.sessionId,
+        title: row.displayLabel || row.title || row.name,
+        blank: row.blank
+      };
+    }).filter(function (row) { return row && row.sessionId; });
+    if (state.sessionId) return;
+    var sel = readSidebarSelection();
+    var sid = sessionIdFromTreeItem(sel.el) || matchSessionIdByLabel(sel.label);
+    if (sid) rememberSession(sid);
+  }
+
+  function extractSessionIdFromRpc(msg) {
+    if (!msg || typeof msg !== 'object') return '';
+    var payload = msg.payload && typeof msg.payload === 'object' ? msg.payload : msg;
+    if (payload.sessionId) return normalizeSessionId(payload.sessionId);
+    if (payload.result && payload.result.value) {
+      var v = payload.result.value;
+      if (v.sessionId) return normalizeSessionId(v.sessionId);
+      if (Array.isArray(v.items) && v.items[0] && v.items[0].sessionId && v.items.length === 1) {
+        return normalizeSessionId(v.items[0].sessionId);
+      }
+    }
+    return '';
+  }
+
+  async function fetchSessionList() {
+    if (state.sessionItems.length) return state.sessionItems;
+    try {
+      var r = await fetch('/simple-auth/sessions', { credentials: 'same-origin' });
+      if (r.ok) {
+        var data = await r.json();
+        if (data && Array.isArray(data.items) && data.items.length) {
+          ingestSessionList(data.items);
+          return state.sessionItems;
+        }
+      }
+    } catch (e) {}
+    try {
+      var r2 = await fetch('/api/session.list', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'client-request', rpcId: uuid(), payload: {} })
+      });
+      if (!r2.ok) return [];
+      var data2 = await r2.json();
+      var items = data2 && data2.result && data2.result.ok && data2.result.value && data2.result.value.items;
+      if (Array.isArray(items)) ingestSessionList(items);
+      return state.sessionItems;
+    } catch (e) {
+      return [];
+    }
+  }
+
+  async function resolveSessionId() {
+    var sid = state.sessionId;
+    if (sid) return sid;
     try {
       var stored = sessionStorage.getItem('dsh_simple_auth_session') || '';
-      if (stored) return normalizeSessionId(stored);
+      if (stored) sid = normalizeSessionId(stored);
     } catch (e) {}
+    if (sid) {
+      state.sessionId = sid;
+      return sid;
+    }
+    var sel = readSidebarSelection();
+    state.sidebarLabel = sel.label;
+    sid = sessionIdFromTreeItem(sel.el);
+    if (sid) {
+      rememberSession(sid);
+      return sid;
+    }
+    await fetchSessionList();
+    sid = matchSessionIdByLabel(sel.label);
+    if (sid) {
+      rememberSession(sid);
+      return sid;
+    }
+    if (state.sessionItems.length === 1 && state.sessionItems[0].sessionId) {
+      rememberSession(state.sessionItems[0].sessionId);
+      return state.sessionId;
+    }
     return '';
   }
 
@@ -72,15 +224,30 @@ export function sharePanelScript() {
       window.__dshSimpleAuthFetchHook = true;
       var origFetch = window.fetch.bind(window);
       window.fetch = function (input, init) {
+        var url = typeof input === 'string' ? input : (input && input.url) || '';
         try {
-          var url = typeof input === 'string' ? input : (input && input.url) || '';
           var body = init && init.body;
           if (typeof body === 'string' && url.indexOf('/api/') >= 0) {
-            var msg = JSON.parse(body);
-            if (msg && msg.payload && msg.payload.sessionId) rememberSession(msg.payload.sessionId);
+            var req = JSON.parse(body);
+            var reqSid = extractSessionIdFromRpc(req);
+            if (reqSid) rememberSession(reqSid);
           }
         } catch (e) {}
-        return origFetch(input, init);
+        return origFetch(input, init).then(function (res) {
+          try {
+            if (url.indexOf('/api/') < 0) return res;
+            return res.clone().json().then(function (data) {
+              var sid = extractSessionIdFromRpc(data);
+              if (sid) rememberSession(sid);
+              if (url.indexOf('session.list') >= 0 && data.result && data.result.value && data.result.value.items) {
+                ingestSessionList(data.result.value.items);
+              }
+              return res;
+            }).catch(function () { return res; });
+          } catch (e) {
+            return res;
+          }
+        });
       };
     }
     if (!window.__dshSimpleAuthWsHook) {
@@ -93,11 +260,21 @@ export function sharePanelScript() {
           try {
             if (typeof data === 'string') {
               var msg = JSON.parse(data);
-              if (msg && msg.payload && msg.payload.sessionId) rememberSession(msg.payload.sessionId);
+              var sid = extractSessionIdFromRpc(msg);
+              if (sid) rememberSession(sid);
             }
           } catch (e) {}
           return origSend(data);
         };
+        ws.addEventListener('message', function (ev) {
+          try {
+            if (typeof ev.data === 'string') {
+              var msg = JSON.parse(ev.data);
+              var sid = extractSessionIdFromRpc(msg);
+              if (sid) rememberSession(sid);
+            }
+          } catch (e) {}
+        });
         return ws;
       };
       window.WebSocket.prototype = OrigWS.prototype;
@@ -106,6 +283,25 @@ export function sharePanelScript() {
       window.WebSocket.CLOSING = OrigWS.CLOSING;
       window.WebSocket.CLOSED = OrigWS.CLOSED;
     }
+  }
+
+  function watchSidebar() {
+    var tree = document.querySelector('[role="tree"][aria-label="会话"]');
+    if (!tree || tree.__dshSaWatch) return;
+    tree.__dshSaWatch = true;
+    var timer = null;
+    var bump = function () {
+      if (timer) return;
+      timer = setTimeout(function () {
+        timer = null;
+        var sel = readSidebarSelection();
+        state.sidebarLabel = sel.label;
+        var sid = sessionIdFromTreeItem(sel.el) || matchSessionIdByLabel(sel.label);
+        if (sid) rememberSession(sid);
+      }, 120);
+    };
+    new MutationObserver(bump).observe(tree, { subtree: true, attributes: true, childList: true, attributeFilter: ['aria-selected', 'aria-current', 'class', 'data-state'] });
+    tree.addEventListener('click', bump, true);
   }
 
   async function loadSessionAcl(sessionId) {
@@ -177,32 +373,68 @@ export function sharePanelScript() {
     await render();
   }
 
-  var bar, panel, body, meEl;
+  var root, menu, panel, body, meEl, fabBtn;
 
-  var BAR_BOTTOM = '132px';
-  var PANEL_BOTTOM = '184px';
+  var btnStyle =
+    'display:block;width:100%;padding:9px 14px;background:#fff;color:#111;border:1px solid #d0d0d0;border-radius:8px;' +
+    'cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.12);font:13px/1.2 ui-sans-serif,system-ui,sans-serif;text-align:left;white-space:nowrap';
+
+  function setMenuOpen(open) {
+    state.menuOpen = !!open;
+    if (menu) menu.style.display = state.menuOpen ? 'flex' : 'none';
+    if (fabBtn) fabBtn.setAttribute('aria-expanded', state.menuOpen ? 'true' : 'false');
+    if (!state.menuOpen && !state.panelOpen) closePanel();
+  }
+
+  function closePanel() {
+    state.panelOpen = false;
+    if (panel) panel.style.display = 'none';
+  }
+
+  function confirmSwitchUser() {
+    if (!state.me) return false;
+    var name = state.me.name || state.me.id;
+    return window.confirm(
+      '确定要退出当前用户「' + name + '」并返回登录页吗？\\n\\n退出后需要重新输入访问密钥才能进入。'
+    );
+  }
 
   function mount() {
-    if (!document.body || document.getElementById('dsh-simple-auth-bar')) return;
+    if (!document.body || document.getElementById('dsh-simple-auth-fab')) return;
 
-    bar = document.createElement('div');
-    bar.id = 'dsh-simple-auth-bar';
-    bar.setAttribute('data-dsh-simple-auth-ui', 'bar');
-    bar.style.cssText =
-      'position:fixed;right:14px;bottom:' + BAR_BOTTOM + ';z-index:2147483646;display:flex;gap:8px;align-items:center;' +
-      'font:13px/1.2 ui-sans-serif,system-ui,sans-serif;pointer-events:auto;flex-wrap:wrap;justify-content:flex-end;max-width:min(420px,calc(100vw - 28px))';
-    bar.innerHTML =
-      '<span id="dsh-sa-user" style="padding:7px 12px;background:#fff;color:#111;border:1px solid #c9c9c9;border-radius:999px;box-shadow:0 2px 10px rgba(0,0,0,.18);font-weight:600">…</span>' +
-      '<button type="button" id="dsh-sa-switch" style="padding:7px 12px;background:#f3f4f6;color:#111;border:1px solid #c9c9c9;border-radius:8px;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.12)">切换用户</button>' +
-      '<button type="button" id="dsh-sa-share-btn" style="padding:7px 12px;background:#1f6b52;color:#fff;border:0;border-radius:8px;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.18);font-weight:600">分享会话</button>';
-    (document.documentElement || document.body).appendChild(bar);
+    root = document.createElement('div');
+    root.id = 'dsh-simple-auth-fab';
+    root.setAttribute('data-dsh-simple-auth-ui', 'fab');
+    root.style.cssText =
+      'position:fixed;right:16px;bottom:20px;z-index:2147483646;display:flex;flex-direction:column;align-items:flex-end;gap:10px;' +
+      'font:13px/1.2 ui-sans-serif,system-ui,sans-serif;pointer-events:auto';
+
+    menu = document.createElement('div');
+    menu.id = 'dsh-sa-menu';
+    menu.style.cssText = 'display:none;flex-direction:column;align-items:stretch;gap:8px;min-width:148px';
+    menu.innerHTML =
+      '<div id="dsh-sa-user" style="padding:8px 12px;background:#fff;color:#111;border:1px solid #d0d0d0;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,.12);font-weight:600;text-align:center">…</div>' +
+      '<button type="button" id="dsh-sa-share-btn" style="' + btnStyle + ';background:#1f6b52;color:#fff;border:0;font-weight:600;text-align:center">分享会话</button>' +
+      '<button type="button" id="dsh-sa-switch" style="' + btnStyle + '">切换用户</button>';
+    root.appendChild(menu);
+
+    fabBtn = document.createElement('button');
+    fabBtn.type = 'button';
+    fabBtn.id = 'dsh-sa-fab';
+    fabBtn.setAttribute('aria-label', '账户与分享');
+    fabBtn.setAttribute('aria-expanded', 'false');
+    fabBtn.style.cssText =
+      'width:48px;height:48px;border:0;border-radius:50%;background:#1f6b52;color:#fff;cursor:pointer;' +
+      'box-shadow:0 4px 16px rgba(0,0,0,.22);font-size:22px;line-height:1;font-weight:700';
+    fabBtn.textContent = '⋮';
+    root.appendChild(fabBtn);
 
     panel = document.createElement('div');
     panel.id = 'dsh-simple-auth-share';
     panel.setAttribute('data-dsh-simple-auth-ui', 'panel');
     panel.style.cssText =
-      'display:none;position:fixed;right:14px;bottom:' + PANEL_BOTTOM + ';z-index:2147483646;width:min(340px,calc(100vw - 28px));' +
-      'max-height:min(46vh,340px);overflow:auto;background:#fff;color:#111;border:1px solid #d0d0d0;border-radius:10px;padding:12px;' +
+      'display:none;position:fixed;right:16px;bottom:88px;z-index:2147483646;width:min(340px,calc(100vw - 32px));' +
+      'max-height:min(50vh,360px);overflow:auto;background:#fff;color:#111;border:1px solid #d0d0d0;border-radius:10px;padding:12px;' +
       'font:13px/1.45 ui-sans-serif,system-ui,sans-serif;box-shadow:0 10px 32px rgba(0,0,0,.22)';
     panel.innerHTML =
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">' +
@@ -212,22 +444,38 @@ export function sharePanelScript() {
       '<div id="dsh-sa-body" style="color:#444">加载中…</div>';
     (document.documentElement || document.body).appendChild(panel);
 
+    (document.documentElement || document.body).appendChild(root);
+
     body = panel.querySelector('#dsh-sa-body');
     meEl = panel.querySelector('#dsh-sa-me');
-    document.getElementById('dsh-sa-switch').onclick = function () {
-      location.href = '/logout?next=' + encodeURIComponent('/login');
-    };
-    document.getElementById('dsh-sa-close').onclick = function () {
-      state.panelOpen = false;
-      panel.style.display = 'none';
-    };
-    document.getElementById('dsh-sa-share-btn').onclick = async function () {
-      state.panelOpen = !state.panelOpen;
-      panel.style.display = state.panelOpen ? 'block' : 'none';
-      if (state.panelOpen) await render();
+
+    fabBtn.onclick = function () {
+      setMenuOpen(!state.menuOpen);
     };
 
+    document.getElementById('dsh-sa-switch').onclick = function () {
+      if (!confirmSwitchUser()) return;
+      location.href = '/logout?next=' + encodeURIComponent('/login');
+    };
+
+    document.getElementById('dsh-sa-close').onclick = function () {
+      closePanel();
+    };
+
+    document.getElementById('dsh-sa-share-btn').onclick = async function () {
+      state.panelOpen = true;
+      panel.style.display = 'block';
+      await render();
+    };
+
+    document.addEventListener('click', function (ev) {
+      if (!root || !state.menuOpen) return;
+      if (root.contains(ev.target) || (panel && panel.contains(ev.target))) return;
+      setMenuOpen(false);
+    });
+
     hookTransports();
+    watchSidebar();
     boot();
   }
 
@@ -242,13 +490,16 @@ export function sharePanelScript() {
     if (meEl) meEl.textContent = '当前用户：' + (state.me.name || state.me.id);
     if (!body) return;
 
-    state.sidebarLabel = readSidebarLabel();
-    var sid = activeSessionId();
-    rememberSession(sid);
+    var sel = readSidebarSelection();
+    state.sidebarLabel = sel.label;
+    var sid = await resolveSessionId();
     if (!sid) {
-      body.innerHTML = '<div style="color:#666">请先在左侧选中一个会话，再打开分享面板。</div>';
+      body.innerHTML =
+        '<div style="color:#666">未能识别当前会话。</div>' +
+        '<div style="color:#888;font-size:12px;margin-top:6px">请在左侧点击一个会话后再试；若仍无效请刷新页面。</div>';
       return;
     }
+    rememberSession(sid);
 
     var acl = await loadSessionAcl(sid);
     if (!acl) {
@@ -319,13 +570,19 @@ export function sharePanelScript() {
     try {
       var meR = await fetch('/simple-auth/me', { credentials: 'same-origin' });
       if (!meR.ok) {
-        if (document.getElementById('dsh-sa-user')) document.getElementById('dsh-sa-user').textContent = '单用户';
-        if (document.getElementById('dsh-sa-share-btn')) document.getElementById('dsh-sa-share-btn').style.display = 'none';
+        if (root) root.style.display = 'none';
+        if (panel) panel.style.display = 'none';
         return;
       }
       state.me = await meR.json();
       var usersR = await fetch('/simple-auth/users', { credentials: 'same-origin' });
       if (usersR.ok) state.users = await usersR.json();
+      await fetchSessionList();
+      watchSidebar();
+      var sel = readSidebarSelection();
+      state.sidebarLabel = sel.label;
+      var sid = sessionIdFromTreeItem(sel.el) || matchSessionIdByLabel(sel.label);
+      if (sid) rememberSession(sid);
     } catch (e) {}
     if (state.panelOpen) render();
   }
