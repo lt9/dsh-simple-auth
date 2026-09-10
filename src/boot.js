@@ -248,10 +248,22 @@ export function sharePanelScript() {
     'display:block;width:100%;padding:9px 14px;background:#fff;color:#111;border:1px solid #d0d0d0;border-radius:8px;' +
     'cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.12);font:13px/1.2 ui-sans-serif,system-ui,sans-serif;text-align:left;white-space:nowrap';
 
+  function paintUser() {
+    var userEl = document.getElementById('dsh-sa-user');
+    if (!userEl) return;
+    if (!state.me) {
+      userEl.textContent = '…';
+      return;
+    }
+    userEl.textContent = state.me.name || state.me.id;
+    if (meEl) meEl.textContent = '当前用户：' + (state.me.name || state.me.id);
+  }
+
   function setMenuOpen(open) {
     state.menuOpen = !!open;
     if (menu) menu.style.display = state.menuOpen ? 'flex' : 'none';
     if (fabBtn) fabBtn.setAttribute('aria-expanded', state.menuOpen ? 'true' : 'false');
+    if (state.menuOpen) paintUser();
   }
 
   function closePanel() {
@@ -327,12 +339,13 @@ export function sharePanelScript() {
     body = panel.querySelector('#dsh-sa-body');
     meEl = panel.querySelector('#dsh-sa-me');
 
-    fabBtn.onclick = function () {
+    fabBtn.onclick = async function () {
       if (state.panelOpen) {
         closePanel();
         setMenuOpen(false);
         return;
       }
+      if (!state.me) await boot();
       setMenuOpen(!state.menuOpen);
     };
 
@@ -361,14 +374,11 @@ export function sharePanelScript() {
   }
 
   async function render() {
-    var userEl = document.getElementById('dsh-sa-user');
+    paintUser();
     if (!state.me) {
-      if (userEl) userEl.textContent = '未识别用户';
       if (body) body.textContent = '请重新登录';
       return;
     }
-    if (userEl) userEl.textContent = state.me.name || state.me.id;
-    if (meEl) meEl.textContent = '当前用户：' + (state.me.name || state.me.id);
     if (!body) return;
 
     var sid = await resolveSessionId();
@@ -444,21 +454,32 @@ export function sharePanelScript() {
     });
   }
 
+  var bootPromise = null;
+
   async function boot() {
+    if (bootPromise) return bootPromise;
+    bootPromise = (async function () {
+      try {
+        var meR = await fetch('/simple-auth/me', { credentials: 'same-origin' });
+        if (!meR.ok) {
+          if (root) root.style.display = 'none';
+          if (panel) panel.style.display = 'none';
+          return;
+        }
+        state.me = await meR.json();
+        if (state.me && state.me.currentSessionId) rememberSession(state.me.currentSessionId);
+        var usersR = await fetch('/simple-auth/users', { credentials: 'same-origin' });
+        if (usersR.ok) state.users = await usersR.json();
+        await fetchSessionList();
+      } catch (e) {}
+      paintUser();
+      if (state.panelOpen) render();
+    })();
     try {
-      var meR = await fetch('/simple-auth/me', { credentials: 'same-origin' });
-      if (!meR.ok) {
-        if (root) root.style.display = 'none';
-        if (panel) panel.style.display = 'none';
-        return;
-      }
-      state.me = await meR.json();
-      if (state.me && state.me.currentSessionId) rememberSession(state.me.currentSessionId);
-      var usersR = await fetch('/simple-auth/users', { credentials: 'same-origin' });
-      if (usersR.ok) state.users = await usersR.json();
-      await fetchSessionList();
-    } catch (e) {}
-    if (state.panelOpen) render();
+      await bootPromise;
+    } finally {
+      if (!state.me) bootPromise = null;
+    }
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount);
