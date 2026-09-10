@@ -1,12 +1,49 @@
 # dsh-simple-auth
 
-[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) Web 的**单密钥**登录门。
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) Web 的极致轻量登录门。
 
-没有用户表，没有「首次访问抢注密码」，没有运行时依赖。你准备一把访问密钥（环境变量或文件），访客输入一次，插件签发 HttpOnly Cookie，之后所有页面、API、WebSocket 升级都要带着有效会话。
+零生产依赖。一个输入框。可选 **master / guest** 多把密钥。会话默认隔离；只有 **owner** 能分享或取消分享；侧栏列表按 **ACL 过滤**；右下角 **分享 FAB** 针对当前选中的会话。
 
-形态和常见的私有看板 API Key 一样：一把密钥、一个输入框、可选「在这台设备记住」。
+目录里已有的登录门偏密码、TOTP、设置卡片。这一款只做共享密钥（或每用户密钥文件）+ 会话 ACL。不要和 `dsh-auth-gate`、`dsh-webui-auth`、`dsh-web-startup-auth`、`dsh-auth-gateway` 叠装。
 
 [English](README.md)
+
+## 安装
+
+```bash
+dsh plugin --profile web add github:lt9/dsh-simple-auth
+```
+
+若 profile 是 pnpm workspace 并报 `ERR_PNPM_ADDING_TO_ROOT`：
+
+```bash
+dsh plugin --profile web add -w github:lt9/dsh-simple-auth
+```
+
+本地目录：
+
+```bash
+dsh plugin --profile web add ./dsh-simple-auth
+```
+
+**重启 dsh 之前**先配好密钥。门是**默认拒绝**的：密钥缺失时登录页会说明原因，其它请求一律拒绝。
+
+```bash
+export DSH_SIMPLE_AUTH_KEY='足够长的随机串'
+```
+
+systemd / Docker 把同一变量写进 `Environment` / `EnvironmentFile`。若要复用已经在用的密钥，不要把密钥写进 YAML，只改 `keyEnv` 指向那个环境变量：
+
+```yaml
+# $DSH_HOME/cordis.patch.yml
+- id: dsh-simple-auth
+  config:
+    keyEnv: EXISTING_SECRET_ENV
+```
+
+重启 dsh web 进程，打开页面，输入密钥即可。
+
+`dsh --profile web --dump-config` 应能看到名为 `dsh-simple-auth` 的行。
 
 ## 截图
 
@@ -27,32 +64,6 @@
 - Node.js ≥ 20
 - dsh 的 web profile（在 `@deepseek-ai/dsh@0.1.1-rc.2` 与 `@deepseek-ai/dsh@0.1.2-rc.1` 上验证；两者仍暴露 `webServer.server`）
 - 使用 `dsh plugin add` 时，`PATH` 上需要 `pnpm`
-
-## 安装
-
-```bash
-git clone https://github.com/lt9/dsh-simple-auth.git
-dsh plugin --profile web add ./dsh-simple-auth
-# 若报 ERR_PNPM_ADDING_TO_ROOT，把 -w 传给 pnpm：
-#   dsh plugin --profile web add -w /path/to/dsh-simple-auth
-```
-
-**重启 dsh 之前**先配好密钥。门是**默认拒绝**的：密钥缺失时登录页会说明原因，其它请求一律拒绝。
-
-```bash
-export DSH_SIMPLE_AUTH_KEY='足够长的随机串'
-```
-
-systemd / Docker 把同一变量写进 `Environment` / `EnvironmentFile`。若要复用已经在用的密钥（例如和另一块本机看板同一把），不要把密钥写进 YAML，只改 `keyEnv` 指向那个环境变量：
-
-```yaml
-# $DSH_HOME/cordis.patch.yml
-- id: dsh-simple-auth
-  config:
-    keyEnv: EXISTING_SECRET_ENV
-```
-
-重启 dsh web 进程，打开页面，输入密钥即可。
 
 ## 未登录时的行为
 
@@ -113,11 +124,22 @@ systemd / Docker 把同一变量写进 `Environment` / `EnvironmentFile`。若�
 | `secretFile` | `$DSH_HOME/simple-auth/secret` | Cookie HMAC 密钥（自动生成） |
 | `legacyOwner` | `master` | 升级时未登记 owner 的存量会话归此用户 |
 
-**边界（必须知晓）：** 多用户只隔离会话可见性，不隔离 llama 凭据、bash、workspace、settings。分享会话等于分享能跑命令的 agent。
+## 已知限制
+
+- 分享会话等于分享能跑命令的 agent，不只是聊天文本。llama 凭据、bash、workspace、settings 仍是整机共享。
+- 这是访问控制，不是 TLS 或「agent 等于远程代码执行」的替代品。
+- 目录上架（若已列出）不等于安全审计。
+
+## 停用 / 卸载
+
+```bash
+dsh plugin --profile web remove dsh-simple-auth
+```
+
+然后重启 dsh web 进程。若只想暂时关掉而不卸载，去掉 `usersFile` / `keyEnv` / `keyFile`——门会关死。
 
 ## 安全
 
-- 这是访问控制，不是 TLS、系统加固或「agent 等于远程代码执行」的替代品。拿到密钥就能驱动 agent。
 - 配置缺失时关死，不会把界面裸奔出去。
 - 登录按客户端 IP 限速（仅当对端是回环时才信任 `X-Forwarded-For`）。
 - 会话用访问密钥做 HMAC 签名（无状态）。轮换密钥会使全部 Cookie 失效。

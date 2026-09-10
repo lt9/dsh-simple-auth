@@ -1,12 +1,49 @@
 # dsh-simple-auth
 
-A **single shared-key** login gate for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) web.
+Ultra-light login gate for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) web.
 
-No user table, no first-visit password claim, no extra runtime dependencies. You set one access key (environment variable or file). Visitors type that key once; the plugin sets an HttpOnly cookie and then every HTTP request and WebSocket upgrade is closed to everyone else.
+Zero production dependencies. One login field. Optional **master / guest** keys. Sessions are isolated by default; only the **owner** can share or unshare; the sidebar list is **ACL-filtered**; a bottom-right **share FAB** targets the currently selected session.
 
-This is the same shape as a private-dashboard API key: one secret, a login field, optional “remember on this device”.
+Other catalog login gates cover passwords, TOTP, or settings cards. This one stays a shared-key (or per-user key file) gate plus session ACL. Do not stack it with `dsh-auth-gate`, `dsh-webui-auth`, `dsh-web-startup-auth`, or `dsh-auth-gateway`.
 
 [中文说明](README.zh.md)
+
+## Install
+
+```bash
+dsh plugin --profile web add github:lt9/dsh-simple-auth
+```
+
+If the profile is a pnpm workspace and add fails with `ERR_PNPM_ADDING_TO_ROOT`:
+
+```bash
+dsh plugin --profile web add -w github:lt9/dsh-simple-auth
+```
+
+Local checkout:
+
+```bash
+dsh plugin --profile web add ./dsh-simple-auth
+```
+
+Set the key **before** restarting dsh. The gate **fails closed**: if the key is missing, the login page explains that and every other request is denied.
+
+```bash
+export DSH_SIMPLE_AUTH_KEY='a-long-random-secret'
+```
+
+systemd / Docker: put the same variable in the service `Environment` / `EnvironmentFile`. To reuse an existing secret, point `keyEnv` at that variable instead of copying it:
+
+```yaml
+# $DSH_HOME/cordis.patch.yml  (home layer; replaces this plugin row's config)
+- id: dsh-simple-auth
+  config:
+    keyEnv: EXISTING_SECRET_ENV
+```
+
+Restart the dsh web process, open the UI, enter the key.
+
+`dsh --profile web --dump-config` should list a row named `dsh-simple-auth`.
 
 ## Screenshots
 
@@ -27,33 +64,6 @@ The share panel in the bottom-right targets the **currently selected sidebar ses
 - Node.js ≥ 20
 - dsh web profile (tested on `@deepseek-ai/dsh@0.1.1-rc.2` and `@deepseek-ai/dsh@0.1.2-rc.1`; both still expose `webServer.server`)
 - `pnpm` on `PATH` if you use `dsh plugin add`
-
-## Install
-
-```bash
-git clone https://github.com/lt9/dsh-simple-auth.git
-dsh plugin --profile web add ./dsh-simple-auth
-# Some dsh web profiles are a pnpm workspace. If add refuses with
-# ERR_PNPM_ADDING_TO_ROOT, pass -w through to pnpm:
-#   dsh plugin --profile web add -w /path/to/dsh-simple-auth
-```
-
-Set the key **before** restarting dsh. The gate **fails closed**: if the key is missing, the login page explains that and every other request is denied.
-
-```bash
-export DSH_SIMPLE_AUTH_KEY='a-long-random-secret'
-```
-
-systemd / Docker: put the same variable in the service `Environment` / `EnvironmentFile`. To reuse an existing secret (for example the same value you already type into another local dashboard), point `keyEnv` at that variable instead of copying it:
-
-```yaml
-# $DSH_HOME/cordis.patch.yml  (home layer; replaces this plugin row's config)
-- id: dsh-simple-auth
-  config:
-    keyEnv: EXISTING_SECRET_ENV
-```
-
-Restart the dsh web process, open the UI, enter the key.
 
 ## What it protects
 
@@ -89,7 +99,12 @@ Never put the key itself in YAML or git.
 
 When `usersFile` is set, each login key maps to a user `id` + `name`. Cookies sign `userId` with a separate `secret` file. Sessions are isolated by default; the **current session** is the `sessionId` from DSH RPC (`session.history` / `session.prompt`, etc.), and titles come from official `session.list`. Owners can share that session. Shared users get mutual access but cannot share or unshare. Concurrent `session.prompt` / `session.updateQueue` on one session returns `409 session-busy`.
 
-**Limits:** credentials, bash, workspace, and settings remain machine-wide. Sharing a session shares the live agent, not chat text only.
+```json
+[
+  { "id": "master", "name": "master", "keyEnv": "DSH_SIMPLE_AUTH_KEY" },
+  { "id": "guest", "name": "guest", "keyFile": "/path/to/guest-key" }
+]
+```
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -98,9 +113,22 @@ When `usersFile` is set, each login key maps to a user `id` + `name`. Cookies si
 | `secretFile` | `$DSH_HOME/simple-auth/secret` | Cookie HMAC secret (auto-created) |
 | `legacyOwner` | `master` | Owner for pre-existing sessions on upgrade |
 
+## Known limitations
+
+- Sharing a session shares the live agent, not chat text only. Credentials, bash, workspace, and settings remain machine-wide.
+- This is access control, not a substitute for TLS or treating the agent as remote code execution.
+- Catalog listing (when present) is not a security audit.
+
+## Disable / uninstall
+
+```bash
+dsh plugin --profile web remove dsh-simple-auth
+```
+
+Then restart the dsh web process. To disable without uninstalling, stop setting `usersFile` / `keyEnv` / `keyFile` — the gate fails closed.
+
 ## Security notes
 
-- This is **access control**, not a substitute for TLS, OS hardening, or treating the agent as remote code execution. Anyone with the key can drive the agent.
 - Fail-closed: misconfiguration does not leave the UI open.
 - Login attempts are rate-limited per client IP (honors `X-Forwarded-For` only when the peer is loopback).
 - Sessions are HMAC-signed with the access key (stateless). Rotating the key invalidates every cookie.

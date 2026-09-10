@@ -1,16 +1,17 @@
 {
   "name": "dsh-simple-auth",
-  "version": "0.2.1",
-  "description": "Shared-key login gate for DeepSeek Harness (dsh) with optional multi-user session ACL and sharing.",
+  "version": "0.2.2",
+  "description": "Ultra-light DeepSeek Harness login gate: shared key or master/guest keys, ACL-filtered session list, owner-only share/unshare FAB. Zero production dependencies.",
   "type": "module",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/lt9/dsh-simple-auth.git"
   },
-  "main": "src/index.js",
+  "main": "./src/index.js",
   "exports": {
     ".": "./src/index.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
   "files": [
@@ -29,8 +30,11 @@
   },
   "keywords": [
     "dsh",
+    "dsh-plugin",
     "deepseek-harness",
     "auth",
+    "session-acl",
+    "session-sharing",
     "plugin"
   ],
   "dsh": {
