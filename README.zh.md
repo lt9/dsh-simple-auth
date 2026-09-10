@@ -25,7 +25,7 @@
 ## 要求
 
 - Node.js ≥ 20
-- dsh 的 web profile（在 `@deepseek-ai/dsh@0.1.1-rc.2` 上验证；只要仍暴露 `webServer.server` 的新版本也应可用）
+- dsh 的 web profile（在 `@deepseek-ai/dsh@0.1.1-rc.2` 与 `@deepseek-ai/dsh@0.1.2-rc.1` 上验证；两者仍暴露 `webServer.server`）
 - 使用 `dsh plugin add` 时，`PATH` 上需要 `pnpm`
 
 ## 安装
@@ -131,7 +131,7 @@ systemd / Docker 把同一变量写进 `Environment` / `EnvironmentFile`。若�
 node --test
 ```
 
-生产依赖为零。Host 半区包裹 `webServer.server` 的 `request` / `upgrade` 监听器，因此静态资源、`/api` 和 socket 都会经过这扇门。
+生产依赖为零。Host 半区包裹 `webServer.server` 的 `request` / `upgrade` 监听器，因此静态资源、`/api` 和 socket 都会经过这扇门。0.1.2 的 Web 面额外有一层浏览器会话 Cookie（`connection.authorizeIndex`）；本插件在自家登录 Cookie 已通过后会跳过这层 401，这样无需进程启动 token 也能打开 SPA。0.1.1 没有这层围栏，行为不变。
 
 ## License
 

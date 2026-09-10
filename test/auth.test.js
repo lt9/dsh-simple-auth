@@ -22,6 +22,7 @@ import {
   signUserCookie,
   verifyUserCookie
 } from '../src/users.js'
+import { resolveWebServer, wrapConnectionBrowserAuth } from '../src/host.js'
 
 test('mergeConfig keeps defaults and overrides keyEnv', () => {
   const c = mergeConfig({ keyEnv: 'LLAMA_API_KEY' })
@@ -304,6 +305,44 @@ test('workspace.list attaches shared sessions by cwd', () => {
     }
   )
   assert.equal(out.result.value.items[0].sessionIds.includes('session-shared'), true)
+})
+
+test('resolveWebServer prefers webServer then httpServer', () => {
+  assert.equal(resolveWebServer({ webServer: { a: 1 }, httpServer: { b: 2 } }).a, 1)
+  assert.equal(resolveWebServer({ httpServer: { b: 2 } }).b, 2)
+  assert.equal(resolveWebServer({}), null)
+})
+
+test('wrapConnectionBrowserAuth skips 0.1.2 browser-session 401 after our login', () => {
+  const conn = {
+    authorizeIndex() {
+      return false
+    },
+    requestRejection() {
+      return 401
+    }
+  }
+  wrapConnectionBrowserAuth(
+    { inject(_deps, fn) { fn({ connection: conn }) } },
+    (req) => Boolean(req.authed)
+  )
+  assert.equal(conn.authorizeIndex({ authed: true }, {}), true)
+  assert.equal(conn.authorizeIndex({ authed: false }, {}), false)
+  assert.equal(conn.requestRejection({ authed: true }), undefined)
+  assert.equal(conn.requestRejection({ authed: false }), 401)
+})
+
+test('wrapConnectionBrowserAuth keeps Host-fence 403', () => {
+  const conn = {
+    requestRejection() {
+      return 403
+    }
+  }
+  wrapConnectionBrowserAuth(
+    { inject(_deps, fn) { fn({ connection: conn }) } },
+    () => true
+  )
+  assert.equal(conn.requestRejection({}), 403)
 })
 
 test('elideHistoryPayload drops closed-message chunks', async () => {

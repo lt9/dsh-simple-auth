@@ -7,6 +7,7 @@ import { elideHistoryPayload } from './history.js'
 import { renderLoginPage } from './login-page.js'
 import { installWsFilter } from './ws-filter.js'
 import { SessionFocus, catalogFromList, catalogLabel, findCatalogRow } from './focus.js'
+import { resolveWebServer, wrapConnectionBrowserAuth } from './host.js'
 import {
   DEFAULTS,
   RateLimiter,
@@ -278,12 +279,13 @@ export function apply(ctx, rawConfig) {
   const config = mergeConfig(rawConfig)
   const state = createAuthState(config)
   const limiter = new RateLimiter(Number(config.failMax) || DEFAULTS.failMax, Number(config.failWindowMs) || DEFAULTS.failWindowMs)
-  const webServer = ctx.webServer
+  const webServer = resolveWebServer(ctx)
   const server = webServer?.server
   if (!server) {
     throw new Error('dsh-simple-auth: webServer.server is missing; this dsh build cannot host a request gate')
   }
   const loopbackAuthority = config.rewriteLoopback === false ? '' : `127.0.0.1:${webServer.port}`
+  wrapConnectionBrowserAuth(ctx, (req) => Boolean(resolveIdentity(req, config, state)))
 
   if (!state.ready) {
     console.error(

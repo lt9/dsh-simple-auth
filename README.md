@@ -25,7 +25,7 @@ The share panel in the bottom-right targets the **currently selected sidebar ses
 ## Requirements
 
 - Node.js ≥ 20
-- dsh web profile (tested on `@deepseek-ai/dsh@0.1.1-rc.2`; newer builds that still expose `webServer.server` should work)
+- dsh web profile (tested on `@deepseek-ai/dsh@0.1.1-rc.2` and `@deepseek-ai/dsh@0.1.2-rc.1`; both still expose `webServer.server`)
 - `pnpm` on `PATH` if you use `dsh plugin add`
 
 ## Install
@@ -114,7 +114,7 @@ When `usersFile` is set, each login key maps to a user `id` + `name`. Cookies si
 node --test
 ```
 
-Zero production dependencies. The host half wraps `webServer.server` `request` / `upgrade` listeners (the same approach used by other dsh auth gates) so static files, `/api`, and sockets are covered even on builds that have no request-gate extension point.
+Zero production dependencies. The host half wraps `webServer.server` `request` / `upgrade` listeners (the same approach used by other dsh auth gates) so static files, `/api`, and sockets are covered even on builds that have no request-gate extension point. On 0.1.2 the web surface also has a browser-session cookie (`connection.authorizeIndex`); after our login cookie is valid, this plugin skips that second 401 so the SPA still loads without the process launch token. 0.1.1 has no such fence and is unchanged.
 
 ## License
 
