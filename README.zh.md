@@ -1,5 +1,7 @@
 # dsh-simple-auth
 
+[![dsh.pub registry status](https://dsh.pub/api/badges/lt9/dsh-simple-auth.svg)](https://dsh.pub/en/plugins/?q=lt9%2Fdsh-simple-auth)
+
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) Web 的极致轻量登录门。
 
 零生产依赖。一个输入框。可选 **master / guest** 多把密钥。会话默认隔离；只有 **owner** 能分享或取消分享；侧栏列表按 **ACL 过滤**；右下角 **分享 FAB** 针对当前选中的会话。

@@ -1,5 +1,7 @@
 # dsh-simple-auth
 
+[![dsh.pub registry status](https://dsh.pub/api/badges/lt9/dsh-simple-auth.svg)](https://dsh.pub/en/plugins/?q=lt9%2Fdsh-simple-auth)
+
 Ultra-light login gate for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) web.
 
 Zero production dependencies. One login field. Optional **master / guest** keys. Sessions are isolated by default; only the **owner** can share or unshare; the sidebar list is **ACL-filtered**; a bottom-right **share FAB** targets the currently selected session.
